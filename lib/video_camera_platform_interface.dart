@@ -1,6 +1,9 @@
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'video_camera_method_channel.dart';
+import 'src/generated/camera_api.g.dart';
+
+export 'src/generated/camera_api.g.dart' show CameraPosition, CameraInfo;
 
 abstract class VideoCameraPlatform extends PlatformInterface {
   /// Constructs a VideoCameraPlatform.
@@ -25,5 +28,9 @@ abstract class VideoCameraPlatform extends PlatformInterface {
 
   Future<String?> getPlatformVersion() {
     throw UnimplementedError('platformVersion() has not been implemented.');
+  }
+
+  Future<CameraInfo> checkCamera(CameraPosition position) {
+    throw UnimplementedError('checkCamera() has not been implemented.');
   }
 }
