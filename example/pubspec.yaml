@@ -16,7 +16,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
+  flutter_riverpod: ^2.5.1
+  native_device_orientation: ^2.0.3
   video_camera:
     # When depending on this package from a real application you should use:
     #   video_camera: ^x.y.z

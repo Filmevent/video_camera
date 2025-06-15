@@ -61,4 +61,7 @@ class CameraInfo {
 abstract class CameraHostApi {
   @async
   CameraInfo checkCamera(CameraPosition position);
+
+  @async
+  Future<String> startCamera(CameraConfiguration config);
 }

@@ -10,18 +10,11 @@ class MethodChannelVideoCamera extends VideoCameraPlatform {
   @visibleForTesting
   final methodChannel = const MethodChannel('video_camera');
 
-  late final CameraHostApi _cameraApi = CameraHostApi();
-
   @override
   Future<String?> getPlatformVersion() async {
     final version = await methodChannel.invokeMethod<String>(
       'getPlatformVersion',
     );
     return version;
-  }
-
-  @override
-  Future<CameraInfo> checkCamera(CameraPosition position) async {
-    return await _cameraApi.checkCamera(position);
   }
 }
