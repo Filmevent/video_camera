@@ -1,7 +1,5 @@
 import Flutter
 import UIKit
-import SwiftUI
-import Observation
 
 class FLNativeViewFactory: NSObject, FlutterPlatformViewFactory {
     private var messenger: FlutterBinaryMessenger
@@ -23,7 +21,6 @@ class FLNativeViewFactory: NSObject, FlutterPlatformViewFactory {
             binaryMessenger: messenger)
     }
 
-
     /// Implementing this method is only necessary when the `arguments` in `createWithFrame` is not `nil`.
 /*     public func createArgsCodec() -> FlutterMessageCodec &#x26; NSObjectProtocol {
           return FlutterStandardMessageCodec.sharedInstance()
@@ -32,8 +29,6 @@ class FLNativeViewFactory: NSObject, FlutterPlatformViewFactory {
 
 class FLNativeView: NSObject, FlutterPlatformView {
     private var _view: UIView
-    private var viewModel: ViewModel
-
 
     init(
         frame: CGRect,
@@ -42,36 +37,22 @@ class FLNativeView: NSObject, FlutterPlatformView {
         binaryMessenger messenger: FlutterBinaryMessenger?
     ) {
         _view = UIView()
-        viewModel = ViewModel()
         super.init()
         // iOS views can be created here
-        createNativeView(view: _view, frame: frame)
+        createNativeView(view: _view)
     }
 
     func view() -> UIView {
         return _view
     }
 
-    func createNativeView(view _view: UIView, frame: CGRect){
-        NSLog("Native View Created")
-        
-        let cameraView = CameraView(image: Binding(
-            get: { self.viewModel.currentFrame },
-            set: { self.viewModel.currentFrame = $0 }
-        ))
-
-        let hostingController = UIHostingController(rootView: cameraView)
-
-        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
-        hostingController.view.backgroundColor = UIColor.clear
-
-        _view.addSubview(hostingController.view)
-
-        NSLayoutConstraint.activate([
-            hostingController.view.topAnchor.constraint(equalTo: _view.topAnchor),
-            hostingController.view.leadingAnchor.constraint(equalTo: _view.leadingAnchor),
-            hostingController.view.trailingAnchor.constraint(equalTo: _view.trailingAnchor),
-            hostingController.view.bottomAnchor.constraint(equalTo: _view.bottomAnchor)
-        ])
+    func createNativeView(view _view: UIView){
+        _view.backgroundColor = UIColor.blue
+        let nativeLabel = UILabel()
+        nativeLabel.text = "Native text from iOS"
+        nativeLabel.textColor = UIColor.white
+        nativeLabel.textAlignment = .center
+        nativeLabel.frame = CGRect(x: 0, y: 0, width: 180, height: 48.0)
+        _view.addSubview(nativeLabel)
     }
 }
