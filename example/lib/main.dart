@@ -21,12 +21,15 @@ class MyApp extends ConsumerWidget {
     print('Current orientation: ${orientation.value}');
     return MaterialApp(
       home: ManualOrientationController(
-        rotationAngle: -90,
+        rotationAngle: 0,
         child: Scaffold(
+          extendBody: true,
+          extendBodyBehindAppBar: true,
           body: orientation.when(
             data: (orientation) {
               return Stack(
                 children: [
+                  VideoCameraWidget(),
                   if (orientation.isPortrait)
                     Center(child: Text('Portrait Mode Detected')),
                 ],

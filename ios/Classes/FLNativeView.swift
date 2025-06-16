@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import SwiftUI
 
 class FLNativeViewFactory: NSObject, FlutterPlatformViewFactory {
     private var messenger: FlutterBinaryMessenger
@@ -20,15 +21,12 @@ class FLNativeViewFactory: NSObject, FlutterPlatformViewFactory {
             arguments: args,
             binaryMessenger: messenger)
     }
-
-    /// Implementing this method is only necessary when the `arguments` in `createWithFrame` is not `nil`.
-/*     public func createArgsCodec() -> FlutterMessageCodec &#x26; NSObjectProtocol {
-          return FlutterStandardMessageCodec.sharedInstance()
-    } */
 }
 
 class FLNativeView: NSObject, FlutterPlatformView {
     private var _view: UIView
+    private var viewModel: ViewModel
+    private var hostingController: UIHostingController<CameraView>?
 
     init(
         frame: CGRect,
@@ -37,22 +35,54 @@ class FLNativeView: NSObject, FlutterPlatformView {
         binaryMessenger messenger: FlutterBinaryMessenger?
     ) {
         _view = UIView()
+        viewModel = ViewModel()
         super.init()
-        // iOS views can be created here
-        createNativeView(view: _view)
+        // Create and embed the SwiftUI view
+        createNativeView(view: _view, frame: frame)
     }
 
     func view() -> UIView {
         return _view
     }
 
-    func createNativeView(view _view: UIView){
-        _view.backgroundColor = UIColor.blue
-        let nativeLabel = UILabel()
-        nativeLabel.text = "Native text from iOS"
-        nativeLabel.textColor = UIColor.white
-        nativeLabel.textAlignment = .center
-        nativeLabel.frame = CGRect(x: 0, y: 0, width: 180, height: 48.0)
-        _view.addSubview(nativeLabel)
+    func createNativeView(view: UIView, frame: CGRect) {
+        // Create a SwiftUI CameraView with binding to viewModel
+        let cameraView = CameraView(image: Binding(
+            get: { self.viewModel.currentFrame },
+            set: { self.viewModel.currentFrame = $0 }
+        ))
+        
+        // Create a hosting controller to embed SwiftUI in UIKit
+        hostingController = UIHostingController(rootView: cameraView)
+        
+        guard let hostingController = hostingController else { return }
+        
+        // Add the hosting controller's view as a subview
+        hostingController.view.frame = view.bounds
+        hostingController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        hostingController.view.backgroundColor = .clear
+        
+        view.addSubview(hostingController.view)
+        
+        // Important: Add the hosting controller as a child view controller
+        // This ensures proper lifecycle management
+        if let parentViewController = view.parentViewController {
+            parentViewController.addChild(hostingController)
+            hostingController.didMove(toParent: parentViewController)
+        }
+    }
+}
+
+// Extension to find the parent view controller
+extension UIView {
+    var parentViewController: UIViewController? {
+        var parentResponder: UIResponder? = self
+        while parentResponder != nil {
+            parentResponder = parentResponder?.next
+            if let viewController = parentResponder as? UIViewController {
+                return viewController
+            }
+        }
+        return nil
     }
 }
