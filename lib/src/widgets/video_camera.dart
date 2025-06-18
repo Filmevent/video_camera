@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:video_camera/src/video_camera_controller.dart';
@@ -26,7 +28,7 @@ class _VideoCameraWidgetState extends State<VideoCameraWidget> {
   }
 
   void _onPlatformViewCreated(int id) {
-    print("Initializing through the controller");
+    log("Initializing through the controller");
     widget.controller.initialize(id);
   }
 }

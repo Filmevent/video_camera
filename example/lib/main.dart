@@ -23,7 +23,7 @@ class MyApp extends ConsumerWidget {
     print('Current orientation: ${orientation.value}');
     return MaterialApp(
       home: ManualOrientationController(
-        rotationAngle: 0,
+        rotationAngle: 90,
         child: CameraScreen(),
       ),
     );
@@ -57,22 +57,31 @@ class _CameraScreenState extends State<CameraScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('What')),
       body: Center(
         // Use a ValueListenableBuilder to react to the initialization state.
-        child: ValueListenableBuilder<bool>(
-          valueListenable: _controller.isInitialized,
-          builder: (context, isInitialized, child) {
-            if (!isInitialized) {
-              // Show a loading indicator until the camera is ready.
-              return const CircularProgressIndicator();
-            }
-            // Once initialized, show the camera preview.
-            return AspectRatio(
-              aspectRatio: 9 / 16,
-              child: VideoCameraWidget(controller: _controller),
-            );
-          },
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // Always build the platform view so onPlatformViewCreated runs.
+            VideoCameraWidget(controller: _controller),
+            // Overlay a spinner until initialization completes.
+            ValueListenableBuilder<bool>(
+              valueListenable: _controller.isInitialized,
+              builder: (context, isInitialized, child) {
+                return isInitialized
+                    ? const SizedBox.shrink()
+                    : const CircularProgressIndicator();
+              },
+            ),
+            ValueListenableBuilder(
+              valueListenable: _controller.isRecording,
+              builder: (context, isRecording, child) {
+                return isRecording
+                    ? const SizedBox.shrink()
+                    : const Text('PortriatModeDetected');
+              },
+            ),
+          ],
         ),
       ),
       floatingActionButton: FloatingActionButton(
