@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -22,33 +24,86 @@ class MyApp extends ConsumerWidget {
     return MaterialApp(
       home: ManualOrientationController(
         rotationAngle: 0,
-        child: Scaffold(
-          extendBody: true,
-          extendBodyBehindAppBar: true,
-          body: orientation.when(
-            data: (orientation) {
-              return Stack(
-                children: [
-                  VideoCameraWidget(),
-                  if (orientation.isPortrait)
-                    Center(child: Text('Portrait Mode Detected')),
-                ],
-              );
-            },
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error:
-                (error, stack) => Center(child: Text('Error: $error\n$stack')),
-          ),
-          floatingActionButton: FloatingActionButton(
-            onPressed: () {
-              // Handle button press
-            },
-            child: Text('Capture'),
-          ),
-          floatingActionButtonLocation:
-              FloatingActionButtonLocation.centerFloat,
+        child: CameraScreen(),
+      ),
+    );
+  }
+}
+
+class CameraScreen extends StatefulWidget {
+  const CameraScreen({super.key});
+
+  @override
+  State<CameraScreen> createState() => _CameraScreenState();
+}
+
+class _CameraScreenState extends State<CameraScreen> {
+  late final VideoCameraController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    log("Creating Controller");
+    _controller = VideoCameraController();
+  }
+
+  @override
+  void dispose() {
+    // Important: Dispose the controller to release native resources.
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('What')),
+      body: Center(
+        // Use a ValueListenableBuilder to react to the initialization state.
+        child: ValueListenableBuilder<bool>(
+          valueListenable: _controller.isInitialized,
+          builder: (context, isInitialized, child) {
+            if (!isInitialized) {
+              // Show a loading indicator until the camera is ready.
+              return const CircularProgressIndicator();
+            }
+            // Once initialized, show the camera preview.
+            return AspectRatio(
+              aspectRatio: 9 / 16,
+              child: VideoCameraWidget(controller: _controller),
+            );
+          },
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _onRecordButtonPressed,
+        // Use a ValueListenableBuilder to change the icon based on recording state.
+        child: ValueListenableBuilder<bool>(
+          valueListenable: _controller.isRecording,
+          builder: (context, isRecording, child) {
+            return Icon(isRecording ? Icons.stop : Icons.videocam);
+          },
         ),
       ),
     );
+  }
+
+  void _onRecordButtonPressed() async {
+    // Ensure the camera is initialized before trying to record.
+    if (!_controller.isInitialized.value) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Camera not ready')));
+      return;
+    }
+
+    if (_controller.isRecording.value) {
+      final filePath = await _controller.stopRecording();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Video saved to: $filePath')));
+    } else {
+      await _controller.startRecording();
+    }
   }
 }

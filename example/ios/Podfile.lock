@@ -25,9 +25,9 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
-  native_device_orientation: e3580675687d5034770da198f6839ebf2122ef94
-  video_camera: 203ba2b982b0e0e10095f0419118501b61d55b1c
+  integration_test: 252f60fa39af5e17c3aa9899d35d908a0721b573
+  native_device_orientation: 348b10c346a60ebbc62fb235a4fdb5d1b61a8f55
+  video_camera: d2e7ba8a191fe55cba49de4d7da76b70a6b85b7d
 
 PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
 

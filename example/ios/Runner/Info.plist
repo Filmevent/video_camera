@@ -28,6 +28,8 @@
     <true/>
     <key>NSCameraUsageDescription</key>
     <string>This app needs camera access to demonstrate the video camera plugin functionality</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>This app needs microphone access to demonstrate the video camera plugin functionality</string>
     <key>UIApplicationSceneManifest</key>
     <dict>
       <key>UIApplicationSupportsMultipleScenes</key>

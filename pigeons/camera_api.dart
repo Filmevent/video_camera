@@ -7,6 +7,35 @@ import 'package:pigeon/pigeon.dart';
     dartPackageName: 'video_camera',
   ),
 )
+@HostApi()
+abstract class CameraHostApi {
+  @async
+  void initializeCamera(int viewId);
+
+  @async
+  void startRecording(int viewId);
+
+  @async
+  String stopRecording(int viewId);
+
+  @async
+  void pauseCamera(int viewId);
+
+  @async
+  void resumeCamera(int viewId);
+
+  @async
+  void disposeCamera(int viewId);
+}
+
+@FlutterApi()
+abstract class CameraFlutterApi {
+  void onCameraReady(int viewId);
+  void onCameraError(int viewId, CameraError error);
+  void onRecordingStarted(int viewId);
+  void onRecordingStopped(int viewId, String filePath);
+}
+
 enum CameraPosition { front, back }
 
 enum VideoCodec { prores422, prores422LT, prores422Proxy, hevc, h264 }
@@ -21,7 +50,7 @@ enum StabilizationMode {
 
 enum MicrophonePosition { external, back, bottom, front }
 
-enum ResolutionPreset { hd4K, hd1080p, hd720p, sd540p, sd480p }
+enum ResolutionPreset { hd4K, hd1080, hd720, sd540, sd480 }
 
 enum ColorSpace { appleLog, hlgBt2020, srgb }
 
@@ -36,32 +65,19 @@ class CameraConfiguration {
 
   CameraConfiguration({
     this.position = CameraPosition.back,
-    this.videoCodec = VideoCodec.hevc,
+    this.videoCodec = VideoCodec.prores422Proxy,
     this.stabilizationMode = StabilizationMode.auto,
     this.microphonePosition = MicrophonePosition.back,
-    this.resolutionPreset = ResolutionPreset.hd1080p,
-    this.colorSpace = ColorSpace.srgb,
+    this.resolutionPreset = ResolutionPreset.hd1080,
+    this.colorSpace = ColorSpace.appleLog,
     this.frameRate = 30,
   });
 }
 
-class CameraInfo {
-  final bool isAvailable;
-  final bool hasPermission;
-  final String? errorMessage;
+class CameraError {
+  final String code;
+  final String message;
+  final String? details;
 
-  CameraInfo({
-    required this.isAvailable,
-    required this.hasPermission,
-    this.errorMessage,
-  });
-}
-
-@HostApi()
-abstract class CameraHostApi {
-  @async
-  CameraInfo checkCamera(CameraPosition position);
-
-  @async
-  Future<String> startCamera(CameraConfiguration config);
+  CameraError({required this.code, required this.message, this.details});
 }
