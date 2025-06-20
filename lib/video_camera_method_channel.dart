@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:video_camera/src/generated/camera_api.g.dart';
 
-import 'video_camera_platform_interface.dart';
+import 'src/video_camera_platform_interface.dart';
 
 /// An implementation of [VideoCameraPlatform] that uses method channels.
 class MethodChannelVideoCamera extends VideoCameraPlatform {

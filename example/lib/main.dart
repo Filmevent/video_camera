@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_camera/video_camera.dart';
 import 'package:video_camera_example/core/services/device_orientation_service/device_orientation_provider.dart';
 import 'package:video_camera_example/manual_orientation_controller.dart';
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -84,14 +85,17 @@ class _CameraScreenState extends State<CameraScreen> {
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _onRecordButtonPressed,
-        // Use a ValueListenableBuilder to change the icon based on recording state.
-        child: ValueListenableBuilder<bool>(
-          valueListenable: _controller.isRecording,
-          builder: (context, isRecording, child) {
-            return Icon(isRecording ? Icons.stop : Icons.videocam);
-          },
+      floatingActionButton: LiquidGlass(
+        shape: LiquidRoundedSuperellipse(borderRadius: Radius.circular(50)),
+        child: FloatingActionButton(
+          onPressed: _onRecordButtonPressed,
+          // Use a ValueListenableBuilder to change the icon based on recording state.
+          child: ValueListenableBuilder<bool>(
+            valueListenable: _controller.isRecording,
+            builder: (context, isRecording, child) {
+              return Icon(isRecording ? Icons.stop : Icons.videocam);
+            },
+          ),
         ),
       ),
     );

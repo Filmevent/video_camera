@@ -49,103 +49,77 @@ class CameraHostApiImpl: CameraHostApi {
 
     func initializeCamera(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let view = factory?.getView(byId: viewId) else {
-            completion(
-                .failure(
-                    PigeonError(
-                        code: "VIEW_NOT_FOUND",
-                        message: "Camera view with ID \(viewId) not found",
-                        details: nil
-                    )))
+            completion(.failure(PigeonError(code: "VIEW_NOT_FOUND", message: "Camera view with ID \(viewId) not found", details: nil)))
             return
         }
 
-        view.initializeCamera { result in
-            completion(result)
+        // Create a Task to run the async function
+        Task {
+            do {
+                try await view.initializeCamera()
+                completion(.success(()))
+            } catch {
+                completion(.failure(error))
+            }
         }
     }
 
     func startRecording(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let view = factory?.getView(byId: viewId) else {
-            completion(
-                .failure(
-                    PigeonError(
-                        code: "VIEW_NOT_FOUND",
-                        message: "Camera view with ID \(viewId) not found",
-                        details: nil
-                    )))
+            completion(.failure(PigeonError(code: "VIEW_NOT_FOUND", message: "Camera view with ID \(viewId) not found", details: nil)))
             return
         }
-
-        view.startRecording { result in
-            completion(result)
+        
+        Task {
+            do {
+                try await view.startRecording()
+                completion(.success(()))
+            } catch {
+                completion(.failure(error))
+            }
         }
     }
 
     func stopRecording(viewId: Int64, completion: @escaping (Result<String, Error>) -> Void) {
         guard let view = factory?.getView(byId: viewId) else {
-            completion(.failure(
-                PigeonError(
-                    code: "VIEW_NOT_FOUND",
-                    message: "Camera view with ID \(viewId) not found",
-                    details: nil
-                )))
+            completion(.failure(PigeonError(code: "VIEW_NOT_FOUND", message: "Camera view with ID \(viewId) not found", details: nil)))
             return
         }
 
-        view.stopRecording(completion: { result in
-            switch result {
-            case .success(let filePath):
+        Task {
+            do {
+                let filePath = try await view.stopRecording()
                 completion(.success(filePath))
-            case .failure(let error):
+            } catch {
                 completion(.failure(error))
             }
-        })
+        }
     }
 
 
     func pauseCamera(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let view = factory?.getView(byId: viewId) else {
-            completion(
-                .failure(
-                    PigeonError(
-                        code: "VIEW_NOT_FOUND",
-                        message: "Camera view with ID \(viewId) not found",
-                        details: nil
-                    )))
+            completion(.failure(PigeonError(code: "VIEW_NOT_FOUND", message: "Camera view with ID \(viewId) not found", details: nil)))
             return
         }
 
-        view.pauseCamera { result in
-            completion(result)
-        }
+        view.pauseCamera()
+        completion(.success(()))
     }
 
     func resumeCamera(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let view = factory?.getView(byId: viewId) else {
-            completion(
-                .failure(
-                    PigeonError(
-                        code: "VIEW_NOT_FOUND",
-                        message: "Camera view with ID \(viewId) not found",
-                        details: nil
-                    )))
+            completion(.failure(PigeonError(code: "VIEW_NOT_FOUND", message: "Camera view with ID \(viewId) not found", details: nil)))
             return
         }
 
-        view.resumeCamera { result in
-            completion(result)
-        }
+        view.resumeCamera()
+        completion(.success(()))
     }
 
     func disposeCamera(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let view = factory?.getView(byId: viewId) else {
-            completion(
-                .failure(
-                    PigeonError(
-                        code: "VIEW_NOT_FOUND",
-                        message: "Camera view with ID \(viewId) not found",
-                        details: nil
-                    )))
+            completion(.failure(PigeonError(code: "VIEW_NOT_FOUND", message: "Camera view with ID \(viewId) not found", details: nil)))
             return
         }
 
@@ -154,7 +128,6 @@ class CameraHostApiImpl: CameraHostApi {
         completion(.success(()))
     }
 }
-
 class FLNativeView: NSObject, FlutterPlatformView, AVCaptureFileOutputRecordingDelegate {
 
     private var _view: CameraPreviewView
@@ -174,6 +147,8 @@ class FLNativeView: NSObject, FlutterPlatformView, AVCaptureFileOutputRecordingD
     var cameraInput: AVCaptureDeviceInput!
     var microphone: AVCaptureDevice!
     var audioInput: AVCaptureDeviceInput!
+    
+    private var recordingContinuation: CheckedContinuation<String, Error>?
 
     var movieFileOutput: AVCaptureMovieFileOutput!
 
@@ -196,235 +171,151 @@ class FLNativeView: NSObject, FlutterPlatformView, AVCaptureFileOutputRecordingD
         return _view
     }
 
-    func initializeCamera(completion: @escaping (Result<Void, Error>) -> Void) {
+    // REFACTORED: initializeCamera now uses async/await
+    func initializeCamera() async throws {
         NSLog("Called initializeCamera")
         guard !isInitialized else {
             NSLog("Already initialized camera")
-            completion(.success(()))
             return
         }
         NSLog("Check permissions")
-        checkPermissions { [weak self] result in
-            switch result {
-            case .success:
-                self?.setupAndStartCaptureSession(completion: completion)
-            case .failure(let error):
-                completion(.failure(error))
-            }
-        }
+        try await checkPermissions()
+        try await setupAndStartCaptureSession()
     }
 
-    func checkPermissions(completion: @escaping (Result<Void, Error>) -> Void) {
+    // REFACTORED: checkPermissions now uses async/await
+    func checkPermissions() async throws {
         NSLog("Checking for permission now")
         let cameraAuthStatus = AVCaptureDevice.authorizationStatus(for: .video)
         switch cameraAuthStatus {
         case .authorized:
-            completion(.success((())))
+            return // Permission already granted
         case .denied, .restricted:
-            let error = CameraError(
-                code: "PERMISSION_DENIED",
-                message: "Camera permission denied. Please enable in Settings.",
-                details: "Current status: \(cameraAuthStatus.rawValue)"
-            )
+            let error = CameraError(code: "PERMISSION_DENIED", message: "Camera permission denied. Please enable in Settings.", details: "Current status: \(cameraAuthStatus.rawValue)")
             flutterApi.onCameraError(viewId: viewId, error: error) { _ in }
-            completion(
-                .failure(
-                    PigeonError(
-                        code: error.code,
-                        message: error.message,
-                        details: error.details
-                    )))
+            throw PigeonError(code: error.code, message: error.message, details: error.details)
         case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { [weak self] authorized in
-                if authorized {
-                    completion(.success(()))
-                } else {
-                    let error = CameraError(
-                        code: "PERMISSION_DENIED",
-                        message: "Camera permission denied. Please enable in Settings.",
-                        details: "User denied permission"
-                    )
-                    self?.flutterApi.onCameraError(viewId: self?.viewId ?? 0, error: error) { _ in }
-                    completion(
-                        .failure(
-                            PigeonError(
-                                code: error.code,
-                                message: error.message,
-                                details: error.details
-                            )))
-
-                }
+            // NEW: Await the permission request instead of using a callback
+            let granted = await AVCaptureDevice.requestAccess(for: .video)
+            if !granted {
+                let error = CameraError(code: "PERMISSION_DENIED", message: "Camera permission denied. Please enable in Settings.", details: "User denied permission")
+                self.flutterApi.onCameraError(viewId: self.viewId, error: error) { _ in }
+                throw PigeonError(code: error.code, message: error.message, details: error.details)
             }
         @unknown default:
-            let error = CameraError(
-                code: "UNKNOWN_ERROR",
-                message: "Unknown camera authorization status",
-                details: nil
-            )
+            let error = CameraError(code: "UNKNOWN_ERROR", message: "Unknown camera authorization status", details: nil)
             flutterApi.onCameraError(viewId: viewId, error: error) { _ in }
-            completion(.failure(PigeonError(
-                code: error.code,
-                message: error.message,
-                details: error.details
-            )))
+            throw PigeonError(code: error.code, message: error.message, details: error.details)
         }
     }
 
-    func setupAndStartCaptureSession(completion: @escaping (Result<Void, Error>) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+    // REFACTORED: setupAndStartCaptureSession is now a nonisolated async function
+    // It is marked `nonisolated` to indicate it can run on any thread, similar to your original `DispatchQueue.global().async`
+    nonisolated func setupAndStartCaptureSession() async throws {
+        do {
+            self.captureSession = AVCaptureSession()
+            guard let session = self.captureSession else { throw CameraSetupError.sessionCreationFailed }
 
-            guard let self = self else {return}
+            session.beginConfiguration()
+            if session.canSetSessionPreset(.inputPriority) { session.sessionPreset = .inputPriority }
+            session.automaticallyConfiguresCaptureDeviceForWideColor = false
 
-            do {
-
-                self.captureSession = AVCaptureSession()
-                guard let session = self.captureSession else {
-                    throw CameraSetupError.sessionCreationFailed
-                }
-
-                session.beginConfiguration()
-
-                if session.canSetSessionPreset(.inputPriority) {
-                    session.sessionPreset = .inputPriority
-                }
-
-                session.automaticallyConfiguresCaptureDeviceForWideColor = false
-
-                guard let mainCamera = try self.setupInputs() else {
-                    throw CameraSetupError.inputSetupFailed
-                }
-                NSLog("\(mainCamera)")
-
-                if !mainCamera.activeFormat.supportedColorSpaces.contains(.appleLog) {
-                    self.captureSession.automaticallyConfiguresCaptureDeviceForWideColor = true
-                    if #available(iOS 26.0, *) {
-                        if mainCamera.activeFormat.isCinematicVideoCaptureSupported {
-                            self.cameraInput.isCinematicVideoCaptureEnabled = true
-                        }
-                    }
-                }
-                try self.setupAudioInputs()
-                try self.setupOutputs()
-
-                DispatchQueue.main.async {
-                    self.setupPreviewLayer()
-                }
-                // Commit configuration
-                session.commitConfiguration()
-                // Start running it
-                session.startRunning()
-
-                self.isSessionRunning = true
-                self.isInitialized = true
-
-                DispatchQueue.main.async {
-                    self.flutterApi.onCameraReady(viewId: self.viewId) { _ in}
-                    completion(.success(()))
-                }
-            } catch {
-                let CameraError = self.mapToCameraError(error)
-                DispatchQueue.main.async{
-                    self.flutterApi.onCameraError(viewId: self.viewId, error: CameraError) { _ in}
-                    completion(.failure(PigeonError(
-                        code: CameraError.code,
-                        message: CameraError.message,
-                        details: CameraError.details
-                    )))
-                }
+            guard let mainCamera = try self.setupInputs() else { throw CameraSetupError.inputSetupFailed }
+            
+            if !mainCamera.activeFormat.supportedColorSpaces.contains(.appleLog) {
+                 self.captureSession.automaticallyConfiguresCaptureDeviceForWideColor = true
+                 if #available(iOS 26.0, *) {
+                     if mainCamera.activeFormat.isCinematicVideoCaptureSupported {
+                         self.cameraInput.isCinematicVideoCaptureEnabled = true
+                     }
+                 }
+            }
+            try self.setupAudioInputs()
+            try self.setupOutputs()
+            
+            // NEW: Switch to the main actor for UI updates
+            await MainActor.run {
+                self.setupPreviewLayer()
             }
 
+            session.commitConfiguration()
+            session.startRunning()
+
+            // These properties should be accessed safely. Using an Actor or locks would be a good next step.
+            await MainActor.run {
+                self.isSessionRunning = true
+                self.isInitialized = true
+            }
+
+            // NEW: Call the flutterApi on the main actor
+            await MainActor.run {
+                self.flutterApi.onCameraReady(viewId: self.viewId) { _ in }
+            }
+        } catch {
+            let cameraError = self.mapToCameraError(error)
+            await MainActor.run {
+                self.flutterApi.onCameraError(viewId: self.viewId, error: cameraError) { _ in }
+            }
+            throw PigeonError(code: cameraError.code, message: cameraError.message, details: cameraError.details)
         }
     }
 
-    //MARK: - Recording Methods
+    // MARK: - Async Recording Methods
 
-    func startRecording(completion: @escaping (Result<Void, Error>) -> Void){
-        guard isInitialized else {
-            completion(.failure(PigeonError(
-                code: "NOT_INITIALIZED",
-                message: "Camera not initialized",
-                details: nil
-            )))
-            return
-        }
-        guard let output = movieFileOutput, !output.isRecording else {
-            completion(.failure(PigeonError(
-                code: "ALREADY_RECORDING",
-                message: "Already recording",
-                details: nil
-            )))
-            return
-        }
+    // REFACTORED: startRecording now async
+    func startRecording() async throws {
+        guard isInitialized else { throw PigeonError(code: "NOT_INITIALIZED", message: "Camera not initialized", details: nil) }
+        guard let output = movieFileOutput, !output.isRecording else { throw PigeonError(code: "ALREADY_RECORDING", message: "Already recording", details: nil) }
 
         let outputFileName = NSUUID().uuidString
-        let outputURL = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent(outputFileName)
-            .appendingPathExtension("mov")
-
-        currentRecordingURL = outputURL
-        recordingCompletion = nil
+        let outputURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(outputFileName).appendingPathExtension("mov")
 
         output.startRecording(to: outputURL, recordingDelegate: self)
-        flutterApi.onRecordingStarted(viewId: viewId) { _ in }
-        completion(.success(()))
-    }
-
-    func stopRecording(completion: @escaping (Result<String, Error>) -> Void){
-        guard let output = movieFileOutput, output.isRecording else {
-            completion(.failure(PigeonError(
-                code: "NOT_RECORDING",
-                message: "Not currently recording",
-                details: nil
-            )))
-            return
+        
+        await MainActor.run {
+            flutterApi.onRecordingStarted(viewId: viewId) { _ in }
         }
-
-        recordingCompletion = completion
-        output.stopRecording()
     }
 
-    //MARK: - AVCaptureFileOutputRecordingDelegate
+    // REFACTORED: stopRecording now uses a continuation to await the delegate callback
+    func stopRecording() async throws -> String {
+        guard let output = movieFileOutput, output.isRecording else {
+            throw PigeonError(code: "NOT_RECORDING", message: "Not currently recording", details: nil)
+        }
+        
+        // NEW: Await the result from the delegate method
+        return try await withCheckedThrowingContinuation { continuation in
+            self.recordingContinuation = continuation
+            output.stopRecording()
+        }
+    }
 
-    func fileOutput(_ output: AVCaptureFileOutput,
-                    didFinishRecordingTo outputFileURL: URL,
-                    from connections: [AVCaptureConnection],
-                    error: Error?){
-        if let error = error{
+    // REFACTORED: Delegate method now resumes the continuation
+    func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
+        if let error = error {
             let cameraError = mapToCameraError(error)
             flutterApi.onCameraError(viewId: viewId, error: cameraError) { _ in }
-            recordingCompletion?(.failure(error))
+            recordingContinuation?.resume(throwing: error) // Resume with an error
         } else {
             let filePath = outputFileURL.path
             flutterApi.onRecordingStopped(viewId: viewId, filePath: filePath) { _ in }
-            recordingCompletion?(.success(filePath))
+            recordingContinuation?.resume(returning: filePath) // Resume with the result
         }
-
-        recordingCompletion = nil
-        currentRecordingURL = nil
+        recordingContinuation = nil
     }
 
-    //MARK: - Lifecycle methods
-
-    func pauseCamera(completion: @escaping (Result<Void, Error>) -> Void) {
-        guard isSessionRunning else {
-            completion(.success(()))
-            return
-        }
-
+    // MARK: - Lifecycle methods (now synchronous as they are fast)
+    
+    func pauseCamera() {
+        guard isSessionRunning else { return }
         captureSession?.stopRunning()
         isSessionRunning = false
-        completion(.success(()))
     }
 
-    func resumeCamera(completion: @escaping (Result<Void, Error>) -> Void) {
-        guard isInitialized, !isSessionRunning else {
-            completion(.success(()))
-            return
-        } 
-
+    func resumeCamera() {
+        guard isInitialized, !isSessionRunning else { return }
         captureSession?.startRunning()
         isSessionRunning = true
-        completion(.success(()))
     }
 
     func dispose() {
@@ -474,7 +365,7 @@ class FLNativeView: NSObject, FlutterPlatformView, AVCaptureFileOutputRecordingD
 
     func setupInputs() throws -> AVCaptureDevice? {
 
-        guard let camera = AVCaptureDevice.default(.builtInDualCamera, for: .video, position: .back) 
+        guard let camera = AVCaptureDevice.default(.builtInDualCamera, for: .video, position: .back)
             ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
             throw CameraSetupError.noSuitableCamera
         }
