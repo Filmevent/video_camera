@@ -3,882 +3,601 @@ import MetalKit
 import Flutter
 import UIKit
 
+// MARK: - Flutter view factory -------------------------------------------------
+
 class FLNativeViewFactory: NSObject, FlutterPlatformViewFactory {
-    private var messenger: FlutterBinaryMessenger
-    private var flutterApi: CameraFlutterApi
+    private let messenger: FlutterBinaryMessenger
+    private let flutterApi: CameraFlutterApi
     private var views: [Int64: FLNativeView] = [:]
 
     init(messenger: FlutterBinaryMessenger) {
         self.messenger = messenger
         self.flutterApi = CameraFlutterApi(binaryMessenger: messenger)
-
         super.init()
-
         CameraHostApiSetup.setUp(binaryMessenger: messenger, api: CameraHostApiImpl(factory: self))
     }
 
-    func create(
-        withFrame frame: CGRect,
-        viewIdentifier viewId: Int64,
-        arguments args: Any?
-    ) -> FlutterPlatformView {
-        let view = FLNativeView(
-            frame: frame,
-            viewIdentifier: viewId,
-            arguments: args,
-            flutterApi: flutterApi
-        )
+    func create(withFrame frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?) -> FlutterPlatformView {
+        let view = FLNativeView(frame: frame, viewIdentifier: viewId, arguments: args, flutterApi: flutterApi)
         views[viewId] = view
         return view
     }
 
-    func getView(byId viewId: Int64) -> FLNativeView? {
-        return views[viewId]
-    }
-
-    func removeView(byId viewId: Int64) {
-        views.removeValue(forKey: viewId)
-    }
+    func getView(byId viewId: Int64) -> FLNativeView? { views[viewId] }
+    func removeView(byId viewId: Int64) { views.removeValue(forKey: viewId) }
 }
+
+// MARK: - Camera host Pigeon glue --------------------------------------------
 
 class CameraHostApiImpl: CameraHostApi {
     weak var factory: FLNativeViewFactory?
+    init(factory: FLNativeViewFactory?) { self.factory = factory }
 
-    init(factory: FLNativeViewFactory?) {
-        self.factory = factory
-    }
-
-    func initializeCamera(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void) {
-        guard let view = factory?.getView(byId: viewId) else {
-            completion(.failure(PigeonError(code: "VIEW_NOT_FOUND", message: "Camera view with ID \(viewId) not found", details: nil)))
+    private func view(for id: Int64, completion: @escaping (Result<FLNativeView, Error>) -> Void) {
+        guard let view = factory?.getView(byId: id) else {
+            completion(.failure(PigeonError(code: "VIEW_NOT_FOUND", message: "Camera view with ID \(id) not found", details: nil)))
             return
         }
+        completion(.success(view))
+    }
 
-        // Create a Task to run the async function
-        Task {
-            do {
-                try await view.initializeCamera()
-                completion(.success(()))
-            } catch {
-                completion(.failure(error))
+    // MARK: async wrappers -----------------------------------------------------
+
+    func initializeCamera(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void) {
+        view(for: viewId) { result in
+            switch result {
+            case .failure(let error): completion(.failure(error))
+            case .success(let view):
+                Task {
+                    do {
+                        try await view.initializeCamera()
+                        completion(.success(()))
+                    } catch { completion(.failure(error)) }
+                }
             }
         }
     }
+    
+    func setLut(viewId: Int64, lutData cubeFileBytes: FlutterStandardTypedData,
+                completion: @escaping (Result<Void, Error>) -> Void) {
+      view(for: viewId) { result in
+        switch result {
+          case .success(let v):
+            Task { @MainActor in
+              do {
+                try v.loadLUT(from: cubeFileBytes.data)
+                completion(.success(()))
+              } catch { completion(.failure(error)) }
+            }
+          case .failure(let e): completion(.failure(e))
+        }
+      }
+    }
+    
+    func getCameraConfiguration(
+        viewId: Int64,
+        completion: @escaping (Result<CameraConfiguration, Error>) -> Void) {
+      view(for: viewId) { result in
+        switch result {
+          case .success(let v) where v.configuration != nil:
+            completion(.success(v.configuration!))
+          case .success:
+            completion(.failure(PigeonError(code: "CONFIG_UNAVAILABLE",
+                                            message: "Camera not ready", details: nil)))
+          case .failure(let e):
+            completion(.failure(e))
+        }
+      }
+    }
 
     func startRecording(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void) {
-        guard let view = factory?.getView(byId: viewId) else {
-            completion(.failure(PigeonError(code: "VIEW_NOT_FOUND", message: "Camera view with ID \(viewId) not found", details: nil)))
-            return
-        }
-        
-        Task {
-            do {
-                try await view.startRecording()
-                completion(.success(()))
-            } catch {
-                completion(.failure(error))
+        view(for: viewId) { result in
+            switch result {
+            case .failure(let error): completion(.failure(error))
+            case .success(let view):
+                Task {
+                    do {
+                        try await view.startRecording()
+                        completion(.success(()))
+                    } catch { completion(.failure(error)) }
+                }
             }
         }
     }
 
     func stopRecording(viewId: Int64, completion: @escaping (Result<String, Error>) -> Void) {
-        guard let view = factory?.getView(byId: viewId) else {
-            completion(.failure(PigeonError(code: "VIEW_NOT_FOUND", message: "Camera view with ID \(viewId) not found", details: nil)))
-            return
+        view(for: viewId) { result in
+            switch result {
+            case .failure(let error): completion(.failure(error))
+            case .success(let view):
+                Task {
+                    do {
+                        let path = try await view.stopRecording()
+                        completion(.success(path))
+                    } catch { completion(.failure(error)) }
+                }
+            }
         }
+    }
 
-        Task {
-            do {
-                let filePath = try await view.stopRecording()
-                completion(.success(filePath))
-            } catch {
+    func pauseCamera(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void) {
+        view(for: viewId) { result in
+            switch result {
+            case .success(let view):
+                view.pauseCamera()
+                completion(.success(()))
+            case .failure(let error):
                 completion(.failure(error))
             }
         }
     }
 
-
-    func pauseCamera(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void) {
-        guard let view = factory?.getView(byId: viewId) else {
-            completion(.failure(PigeonError(code: "VIEW_NOT_FOUND", message: "Camera view with ID \(viewId) not found", details: nil)))
-            return
-        }
-
-        view.pauseCamera()
-        completion(.success(()))
-    }
-
     func resumeCamera(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void) {
-        guard let view = factory?.getView(byId: viewId) else {
-            completion(.failure(PigeonError(code: "VIEW_NOT_FOUND", message: "Camera view with ID \(viewId) not found", details: nil)))
-            return
+        view(for: viewId) { result in
+            switch result {
+            case .success(let view):
+                view.resumeCamera()
+                completion(.success(()))
+            case .failure(let error):
+                completion(.failure(error))
+            }
         }
-
-        view.resumeCamera()
-        completion(.success(()))
     }
 
     func disposeCamera(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void) {
-        guard let view = factory?.getView(byId: viewId) else {
-            completion(.failure(PigeonError(code: "VIEW_NOT_FOUND", message: "Camera view with ID \(viewId) not found", details: nil)))
-            return
+        view(for: viewId) { r in
+            switch r {
+            case .failure(let error): completion(.failure(error))
+            case .success(let view):
+                view.dispose(); self.factory?.removeView(byId: viewId); completion(.success(()))
+            }
         }
-
-        view.dispose()
-        factory?.removeView(byId: viewId)
-        completion(.success(()))
     }
 }
-class FLNativeView: NSObject, FlutterPlatformView, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureFileOutputRecordingDelegate, MTKViewDelegate {
 
-    private var _view: CameraPreviewView
+// MARK: - Metal view with Core‑Image LUT + video recording --------------------
+
+final class FLNativeView: NSObject, FlutterPlatformView, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureFileOutputRecordingDelegate, MTKViewDelegate {
+
+    // Flutter
+    private let _view: CameraPreviewView
     private let viewId: Int64
     private let flutterApi: CameraFlutterApi
+    private(set) var configuration: CameraConfiguration?
 
+    // Life‑cycle
     private var isInitialized = false
     private var isSessionRunning = false
     private var isDisposed = false
 
-    var captureSession: AVCaptureSession!
-    var mainCamera: AVCaptureDevice!
-    var cameraInput: AVCaptureDeviceInput!
-    var microphone: AVCaptureDevice!
-    var audioInput: AVCaptureDeviceInput!
-    
+    // Capture
+    private var captureSession: AVCaptureSession!
+    private var videoDataOutput: AVCaptureVideoDataOutput!
+    private var movieFileOutput: AVCaptureMovieFileOutput!
+    private let videoDataOutputQueue = DispatchQueue(label: "video_camera.video_data_queue", qos: .userInitiated)
+    private var selectedVideoCodec: AVVideoCodecType = .h264
+
+    // Image processing
+    private var lutFilter: CIFilter!
+    private var latestImage: CIImage?
+    private let inflightSemaphore = DispatchSemaphore(value: 1)
+    private var frameCounter = 0
+
+    // Async recording continuation
     private var recordingContinuation: CheckedContinuation<String, Error>?
 
-    // Outputs for both recording and preview
-    var movieFileOutput: AVCaptureMovieFileOutput!
-    private var videoDataOutput: AVCaptureVideoDataOutput!
-    private var videoDataOutputQueue: DispatchQueue!
-    
-    private var lutFilter: CIFilter?
-        
-    private let inflightSemaphore = DispatchSemaphore(value: 3)
-
-    @MainActor private var latestImage: CIImage?
-
+    // MARK: init
     init(frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?, flutterApi: CameraFlutterApi) {
         self._view = CameraPreviewView()
         self.viewId = viewId
         self.flutterApi = flutterApi
         super.init()
-        self.videoDataOutputQueue = DispatchQueue(label: "video_camera.video_data_queue", qos: .userInitiated)
-        self._view.delegate = self
-        loadLUT()
+
+        _view.delegate = self
+        _view.isPaused = true
+
     }
 
+    func view() -> UIView { _view }
 
-    // Replace the entire existing loadLUT() function with this one.
-    func loadLUT(named lutName: String = "rthlut1-33") {
-        // 1. Find the LUT file in the app's bundle.
-        guard let url = Bundle.main.url(forResource: lutName, withExtension: "cube") else {
-            print("Error: LUT file '\(lutName).cube' not found in bundle.")
-            return
-        }
+    // MARK: public camera API ---------------------------------------------------
 
-        // 2. Read the file contents into a single string.
-        guard let fileContents = try? String(contentsOf: url, encoding: .utf8) else {
-            print("Error: Could not read LUT file contents.")
-            return
-        }
-
-        // 3. Parse the file.
-        let lines = fileContents.components(separatedBy: .newlines)
-        var cubeDimension = 0
-        var cubeData: [Float] = []
-        
-        NSLog("Found LUT")
-
-        // Iterate over each line of the file.
-        for line in lines {
-            // Skip comments and empty lines.
-            if line.isEmpty || line.hasPrefix("#") {
-                continue
-            }
-
-            // Find the line that defines the LUT size (e.g., "LUT_3D_SIZE 33").
-            if line.uppercased().hasPrefix("LUT_3D_SIZE") {
-                NSLog("Found LUT SIZE")
-                // Split the line by spaces and get the last component, which should be the size.
-                if let sizeString = line.split(separator: " ").last, let size = Int(sizeString) {
-                    cubeDimension = size
-                    // Pre-allocate memory for the cube data for better performance.
-                    cubeData.reserveCapacity(cubeDimension * cubeDimension * cubeDimension * 4)
-                }
-            }
-            // For all other lines, assume they are color data.
-            else {
-                // Split the line into R, G, B components.
-                let components = line.split(separator: " ").compactMap { Float($0) }
-                
-                // A valid data line should have exactly 3 float components (R, G, B).
-                if components.count == 3 {
-                    cubeData.append(contentsOf: components)
-                    // Append the Alpha channel value. .cube files only contain RGB.
-                    // The CIColorCube filter requires RGBA.
-                    cubeData.append(1.0)
-                }
-            }
-        }
-
-        // 4. Validate the parsed data.
-        guard cubeDimension > 0, !cubeData.isEmpty else {
-            print("Error: Failed to parse LUT file. Check file format for LUT_3D_SIZE and data lines.")
-            return
-        }
-        
-        // The total number of expected values is (size^3) * 4 (for RGBA).
-        let expectedCount = cubeDimension * cubeDimension * cubeDimension * 4
-        if cubeData.count != expectedCount {
-            print("Error: LUT data count (\(cubeData.count)) does not match expected count (\(expectedCount)). The file may be corrupt.")
-            return
-        }
-
-        // 5. Create the CIColorCube filter with the loaded data.
-        self.lutFilter = CIFilter(
-            name: "CIColorCube",
-            parameters: [
-                "inputCubeDimension": cubeDimension,
-                // Convert the [Float] array into the Data object the filter expects.
-                "inputCubeData": Data(buffer: UnsafeBufferPointer(start: &cubeData, count: cubeData.count))
-            ]
-        )
-        
-        NSLog("Successfully loaded LUT '\(lutName).cube' with dimension \(cubeDimension).")
-    }
-
-    func view() -> UIView {
-        return _view
-    }
-
-    // REFACTORED: initializeCamera now uses async/await
+    @MainActor
     func initializeCamera() async throws {
-        NSLog("Called initializeCamera")
-        guard !isInitialized else {
-            NSLog("Already initialized camera")
-            return
-        }
-        NSLog("Check permissions")
+        guard !isInitialized else { return }
         try await checkPermissions()
         try await setupAndStartCaptureSession()
     }
 
-    // REFACTORED: checkPermissions now uses async/await
-    func checkPermissions() async throws {
-        NSLog("Checking for permission now")
-        let cameraAuthStatus = AVCaptureDevice.authorizationStatus(for: .video)
-        switch cameraAuthStatus {
-        case .authorized:
-            return // Permission already granted
-        case .denied, .restricted:
-            let error = CameraError(code: "PERMISSION_DENIED", message: "Camera permission denied. Please enable in Settings.", details: "Current status: \(cameraAuthStatus.rawValue)")
-            flutterApi.onCameraError(viewId: viewId, error: error) { _ in }
-            throw PigeonError(code: error.code, message: error.message, details: error.details)
-        case .notDetermined:
-            // NEW: Await the permission request instead of using a callback
-            let granted = await AVCaptureDevice.requestAccess(for: .video)
-            if !granted {
-                let error = CameraError(code: "PERMISSION_DENIED", message: "Camera permission denied. Please enable in Settings.", details: "User denied permission")
-                self.flutterApi.onCameraError(viewId: self.viewId, error: error) { _ in }
-                throw PigeonError(code: error.code, message: error.message, details: error.details)
-            }
-        @unknown default:
-            let error = CameraError(code: "UNKNOWN_ERROR", message: "Unknown camera authorization status", details: nil)
-            flutterApi.onCameraError(viewId: viewId, error: error) { _ in }
-            throw PigeonError(code: error.code, message: error.message, details: error.details)
-        }
-    }
-
-    // REFACTORED: setupAndStartCaptureSession is now a nonisolated async function
-    // It is marked nonisolated to indicate it can run on any thread, similar to your original DispatchQueue.global().async
-    nonisolated func setupAndStartCaptureSession() async throws {
-        do {
-            self.captureSession = AVCaptureSession()
-            guard let session = self.captureSession else { throw CameraSetupError.sessionCreationFailed }
-
-            session.beginConfiguration()
-            if session.canSetSessionPreset(.inputPriority) { session.sessionPreset = .inputPriority }
-            session.automaticallyConfiguresCaptureDeviceForWideColor = false
-
-            guard let mainCamera = try self.setupInputs() else { throw CameraSetupError.inputSetupFailed }
-            
-            if !mainCamera.activeFormat.supportedColorSpaces.contains(.appleLog) {
-                 self.captureSession.automaticallyConfiguresCaptureDeviceForWideColor = true
-                 if #available(iOS 26.0, *) {
-                     //if mainCamera.activeFormat.isCinematicVideoCaptureSupported {
-                     //    self.cameraInput.isCinematicVideoCaptureEnabled = true
-                     //}
-                 }
-            }
-            try self.setupAudioInputs()
-            try self.setupOutputs()
-            
-            // NEW: Switch to the main actor for UI updates
-            //await MainActor.run {
-            //    self.setupPreviewLayer()
-            //}
-
-            session.commitConfiguration()
-            session.startRunning()
-
-            // These properties should be accessed safely. Using an Actor or locks would be a good next step.
-            await MainActor.run {
-                self.isSessionRunning = true
-                self.isInitialized = true
-                
-                self._view.isPaused = false
-                
-                self.flutterApi.onCameraReady(viewId: self.viewId) { _ in }
-            }
-        } catch {
-            let cameraError = self.mapToCameraError(error)
-            await MainActor.run {
-                self.flutterApi.onCameraError(viewId: self.viewId, error: cameraError) { _ in }
-            }
-            throw PigeonError(code: cameraError.code, message: cameraError.message, details: cameraError.details)
-        }
-    }
-
-    // MARK: - Async Recording Methods
-
-    // REFACTORED: startRecording now async
+    @MainActor
     func startRecording() async throws {
         guard isInitialized else { throw PigeonError(code: "NOT_INITIALIZED", message: "Camera not initialized", details: nil) }
         guard let output = movieFileOutput, !output.isRecording else { throw PigeonError(code: "ALREADY_RECORDING", message: "Already recording", details: nil) }
-
-        let outputFileName = NSUUID().uuidString
-        let outputURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(outputFileName).appendingPathExtension("mov")
-
-        // FIXED: Use the correct delegate method
-        output.startRecording(to: outputURL, recordingDelegate: self)
-        
-        await MainActor.run {
-            flutterApi.onRecordingStarted(viewId: viewId) { _ in }
-        }
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString).appendingPathExtension("mov")
+        output.startRecording(to: url, recordingDelegate: self)
+        flutterApi.onRecordingStarted(viewId: viewId) { _ in }
     }
 
-    // REFACTORED: stopRecording now uses a continuation to await the delegate callback
+    @MainActor
     func stopRecording() async throws -> String {
-        guard let output = movieFileOutput, output.isRecording else {
-            throw PigeonError(code: "NOT_RECORDING", message: "Not currently recording", details: nil)
-        }
-        
-        // NEW: Await the result from the delegate method
+        guard let output = movieFileOutput, output.isRecording else { throw PigeonError(code: "NOT_RECORDING", message: "Not recording", details: nil) }
         return try await withCheckedThrowingContinuation { continuation in
-            self.recordingContinuation = continuation
+            recordingContinuation = continuation
             output.stopRecording()
         }
     }
 
-    // MARK: - Lifecycle methods (now synchronous as they are fast)
-    
     func pauseCamera() {
         guard isSessionRunning else { return }
-        captureSession?.stopRunning()
-        isSessionRunning = false
-        _view.isPaused = true // <-- ADD THIS to stop the render loop
+        captureSession.stopRunning(); isSessionRunning = false; _view.isPaused = true
     }
 
     func resumeCamera() {
         guard isInitialized, !isSessionRunning else { return }
-        _view.isPaused = false // <-- ADD THIS to restart the render loop
-        captureSession?.startRunning()
-        isSessionRunning = true
+        _view.isPaused = false; captureSession.startRunning(); isSessionRunning = true
     }
 
     func dispose() {
         guard !isDisposed else { return }
         isDisposed = true
-
-        if let output = movieFileOutput, output.isRecording {
-            output.stopRecording()
-        }
-        
-        if isSessionRunning {
-            captureSession?.stopRunning()
-        }
-
-        _view.isPaused = true
-        
-        captureSession?.inputs.forEach { captureSession?.removeInput($0) }
-        captureSession?.outputs.forEach { captureSession?.removeOutput($0) }
-
+        movieFileOutput?.stopRecording()
+        if isSessionRunning { captureSession.stopRunning() }
+        _view.isPaused = true; _view.delegate = nil
+        captureSession.inputs.forEach { captureSession.removeInput($0) }
+        captureSession.outputs.forEach { captureSession.removeOutput($0) }
         captureSession = nil
-        mainCamera = nil
-        cameraInput = nil
-        microphone = nil
-        audioInput = nil
-        movieFileOutput = nil
     }
 
-    deinit {
-        dispose()
-    }
+    deinit { dispose() }
+    
+    // MARK: private helpers -----------------------------------------------------
 
-    // MARK: - Error Mapping
-
-    private func mapToCameraError(_ error: Error) -> CameraError {
-        if let setupError = error as? CameraSetupError {
-            return CameraError(
-                code: setupError.code,
-                message: setupError.localizedDescription,
-                details: String(describing: setupError)
-            )
+    private func checkPermissions() async throws {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: return
+        case .notDetermined:
+            guard await AVCaptureDevice.requestAccess(for: .video) else {
+                throw PigeonError(code: "PERMISSION_DENIED", message: "Camera permission denied", details: nil)
+            }
+        default:
+            throw PigeonError(code: "PERMISSION_DENIED", message: "Camera permission denied", details: nil)
         }
-
-        return CameraError(
-            code: "UNKNOWN_ERROR",
-            message: error.localizedDescription,
-            details: String(describing: error)
-        )
     }
 
-    func setupInputs() throws -> AVCaptureDevice? {
+    private func setupAndStartCaptureSession() async throws {
+        do {
+            captureSession = AVCaptureSession()
+            captureSession.beginConfiguration()
+            captureSession.sessionPreset = .inputPriority
+            captureSession.automaticallyConfiguresCaptureDeviceForWideColor = false
 
+            let camera = try setupInputs()
+            try setupAudio()
+            let _ = try setupOutputs()
+
+            captureSession.commitConfiguration()
+            NSLog(camera.activeColorSpace.rawValue.description)
+            switch camera.activeColorSpace.rawValue {
+            case 0:
+                try await loadLUT(named: "rthlut1-17")
+                break
+            case 2:
+                try await loadLUT(named: "rthlut1-17")
+                break
+            case 3:
+                try await loadLUT(named: "rthlut1-17")
+                break
+            default:
+                try await loadLUT(named: "rthlut1-17")
+            }
+            //try await loadLUT(named: camera.activeColorSpace.rawValue.description)
+            captureSession.startRunning()
+            
+            let conf = makeConfiguration()
+            configuration = conf
+            await MainActor.run {
+                isSessionRunning = true
+                isInitialized   = true
+                _view.isPaused  = false
+                flutterApi.onCameraReady(viewId: viewId) { _ in }
+                flutterApi.onCameraConfiguration(viewId: viewId,
+                                                 configuration: conf) { _ in }
+            }
+
+        } catch {
+            let cameraError = mapToCameraError(error)
+            await MainActor.run { flutterApi.onCameraError(viewId: viewId, error: cameraError) { _ in } }
+            throw PigeonError(code: cameraError.code, message: cameraError.message, details: cameraError.details)
+        }
+    }
+
+    private func setupInputs() throws -> AVCaptureDevice {
         guard let camera = AVCaptureDevice.default(.builtInDualCamera, for: .video, position: .back)
-            ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
+                ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
             throw CameraSetupError.noSuitableCamera
         }
-        
-        mainCamera = camera
-        
-        do {
-            try mainCamera.lockForConfiguration()
-            
-            if let format = findBestFormat() {
-                mainCamera.activeFormat = format
-                NSLog("Active format: \(format.formatDescription)")
-                NSLog("AppleLog support: \(format.supportedColorSpaces.contains(.appleLog))")
-                NSLog("HDR support: \(format.supportedColorSpaces.contains(.HLG_BT2020))")
-                NSLog("Stabilization mode: \(format.isVideoStabilizationModeSupported(.cinematicExtended) ? "supported" : "not supported")")
-                NSLog("Field of view: \(format.videoFieldOfView)")
-            } else {
-                NSLog("Could not find optimal format, using default")
-            }
-            
-            mainCamera.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
-            mainCamera.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
-            
-            if mainCamera.activeFormat.supportedColorSpaces.contains(.appleLog) {
-                mainCamera.activeColorSpace = .appleLog
-            } else if mainCamera.activeFormat.supportedColorSpaces.contains(.HLG_BT2020) {
-                mainCamera.activeColorSpace = .HLG_BT2020
-            }
-            
-            mainCamera.unlockForConfiguration()
-        } catch {
-            NSLog("Could not lock device for configuration: \(error)")
-        }
-        
-        do {
-            let input = try AVCaptureDeviceInput(device: mainCamera)
-            
-            guard let session = captureSession, session.canAddInput(input) else {
-                throw CameraSetupError.cannotAddInput
-            }
-            
-            cameraInput = input
-            session.addInput(input)
-            
-        } catch let error as CameraSetupError {
-            throw error
-        } catch {
-            throw CameraSetupError.inputSetupFailed
-        }
-        
-        return mainCamera
-    }
-
-    func setupAudioInputs() throws {
-        guard let mic = AVCaptureDevice.default(for: .audio) else {
-            throw CameraSetupError.audioNotAvailable
-        }
-
-
-        microphone = mic
-
-        do {
-            let input = try AVCaptureDeviceInput(device: microphone)
-
-            guard let session = captureSession, session.canAddInput(input) else {
-                throw CameraSetupError.cannotAddAudioInput
-            }
-
-            audioInput = input
-            session.addInput(input)
-
-            if #available(iOS 26.0, *) {
-                if input.isMultichannelAudioModeSupported(.firstOrderAmbisonics) {
-                    input.multichannelAudioMode = .firstOrderAmbisonics
-                }
-            }
-        } catch let error as CameraSetupError {
-            throw error
-        } catch {
-            throw CameraSetupError.audioSetupFailed
-        }
-    }
-
-    func setupOutputs() throws {
-        videoDataOutput = AVCaptureVideoDataOutput()
-        if captureSession.canAddOutput(videoDataOutput){
-            captureSession.addOutput(videoDataOutput)
-            videoDataOutput.setSampleBufferDelegate(self, queue: videoDataOutputQueue)
-
-            // ------------------- FINAL WORKING SOLUTION -------------------
-            // Get the list of supported formats as UInt32 numbers
-            // Note: We are using the property name you found to be working.
-            let supportedPixelFormats = videoDataOutput.availableVideoPixelFormatTypes.map { ($0 as! NSNumber).uint32Value }
-
-            // Set our desired video settings
-            var newVideoSettings: [String: Any]?
-            
-            // Check if our preferred BGRA format is supported.
-            if supportedPixelFormats.contains(kCVPixelFormatType_32BGRA) {
-                // If yes, set it. This is best for Core Image performance.
-                newVideoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
-                NSLog("Using preferred BGRA format for preview.")
-                
-            } else if supportedPixelFormats.contains(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange) {
-                // If BGRA is not available, fall back to a common YUV format.
-                // Core Image can still handle this efficiently.
-                newVideoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]
-                NSLog("BGRA not supported. Using YUV 420v format for preview.")
-                
-            } else {
-                // If neither is available, we don't set any specific format and let the system decide.
-                NSLog("Neither BGRA nor 420v is supported. Using default video settings for preview.")
-            }
-            
-            if let settings = newVideoSettings {
-                videoDataOutput.videoSettings = settings
-            }
-            // ----------------- END OF FINAL SOLUTION -----------------
-
+        try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
+        if let fmt = findBestFormat(for: camera) { camera.activeFormat = fmt }
+        camera.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
+        camera.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
+        if camera.activeFormat.supportedColorSpaces.contains(.appleLog) {
+            camera.activeColorSpace = .appleLog
+        } else if camera.activeFormat.supportedColorSpaces.contains(.HLG_BT2020){
+            camera.activeColorSpace = .HLG_BT2020
         } else {
-            throw CameraSetupError.cannotAddOutput
+            camera.activeColorSpace = .sRGB
         }
+        let input = try AVCaptureDeviceInput(device: camera)
+        guard captureSession.canAddInput(input) else { throw CameraSetupError.cannotAddInput }
+        captureSession.addInput(input)
+        
+        return camera
+    }
+
+    private func setupAudio() throws {
+        guard let mic = AVCaptureDevice.default(for: .audio) else { throw CameraSetupError.audioNotAvailable }
+        let input = try AVCaptureDeviceInput(device: mic)
+        guard captureSession.canAddInput(input) else { throw CameraSetupError.cannotAddAudioInput }
+        captureSession.addInput(input)
+    }
+
+    private func setupOutputs() throws -> AVCaptureMovieFileOutput {
+        videoDataOutput = AVCaptureVideoDataOutput()
+        guard captureSession.canAddOutput(videoDataOutput) else { throw CameraSetupError.cannotAddOutput }
+        videoDataOutput.setSampleBufferDelegate(self, queue: videoDataOutputQueue)
+        let preferred: [OSType] = [kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange, kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange, kCVPixelFormatType_32BGRA]
+        if let f = preferred.first(where: videoDataOutput.availableVideoPixelFormatTypes.contains) {
+            videoDataOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: f]
+        }
+        captureSession.addOutput(videoDataOutput)
 
         movieFileOutput = AVCaptureMovieFileOutput()
-        
-        guard let output = movieFileOutput,
-            let session = captureSession,
-            session.canAddOutput(output) else {
-            throw CameraSetupError.cannotAddOutput
+        guard let output = movieFileOutput, captureSession.canAddOutput(output) else { throw CameraSetupError.cannotAddOutput }
+        captureSession.addOutput(output)
+        if let conn = output.connection(with: .video) {
+            if conn.isVideoStabilizationSupported { conn.preferredVideoStabilizationMode = .cinematicExtended }
+            let codecs = output.availableVideoCodecTypes
+            if codecs.contains(.proRes422Proxy) {
+                selectedVideoCodec = .proRes422Proxy
+                output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.proRes422Proxy], for: conn)
+            } else if codecs.contains(.hevc) {
+                selectedVideoCodec = .hevc
+                output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: conn)
+            }
         }
-        
-        session.addOutput(output)
-        
-        guard let connection = output.connection(with: .video) else {
-            throw CameraSetupError.outputSetupFailed
-        }
-        
-        // Configure stabilization
-        connection.preferredVideoStabilizationMode = .cinematicExtended
-        
-        if #available(iOS 18.0, *) {
-            connection.preferredVideoStabilizationMode = .cinematicExtendedEnhanced
-        }
-        
-        NSLog("Active stabilization mode: \(connection.activeVideoStabilizationMode.rawValue)")
-        
-        // Configure codec
-        let availableCodecs = output.availableVideoCodecTypes
-        print("Available codecs: \(availableCodecs)")
-        
-        var codecConfigured = false
-        
-        if availableCodecs.contains(.proRes422Proxy) {
-            output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.proRes422Proxy], for: connection)
-            codecConfigured = true
-        } else if availableCodecs.contains(.proRes422) {
-            output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.proRes422], for: connection)
-            codecConfigured = true
-        } else if availableCodecs.contains(.hevc) {
-            output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
-            codecConfigured = true
-        } else if availableCodecs.contains(.h264) {
-            output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.h264], for: connection)
-            codecConfigured = true
-        }
-        
-        if !codecConfigured {
-            throw CameraSetupError.outputSetupFailed
-        }
-        
-        let settings = output.outputSettings(for: connection)
-        NSLog("Output settings: \(settings)")
-
+        return output
     }
+
+    // MARK: LUT -----------------------------------------------------------
+
+    private func parseCube(_ data: Data) throws -> (size: Int, cubeData: Data) {
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "LUT", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid UTF-8"])
+        }
+
+        var cube: [Float] = []
+        var cubeSize = 0
+
+        for line in text.split(separator: "\n") where !line.hasPrefix("#") {
+            if line.uppercased().hasPrefix("LUT_3D_SIZE") {
+                cubeSize = Int(line.split(separator: " ").last!)!
+                cube.reserveCapacity(cubeSize * cubeSize * cubeSize * 4)
+                continue
+            }
+            let rgb = line.split(separator: " ").compactMap(Float.init)
+            if rgb.count == 3 { cube.append(contentsOf: rgb + [1]) }
+        }
+        guard cubeSize > 0, cube.count == cubeSize * cubeSize * cubeSize * 4 else {
+            throw NSError(domain: "LUT", code: -2, userInfo: [NSLocalizedDescriptionKey: "Malformed .cube"])
+        }
+        return (cubeSize, Data(buffer: UnsafeBufferPointer(start: &cube, count: cube.count)))
+    }
+
+    @MainActor
+    func loadLUT(from data: Data) throws {
+        let (size, cubeData) = try parseCube(data)
+        applyCube(size: size, data: cubeData)
+    }
+
+    @MainActor
+    func loadLUT(named name: String = "identity") throws {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "cube") else {
+            throw NSError(domain: "LUT", code: -3, userInfo: [NSLocalizedDescriptionKey: "Missing LUT asset"])
+        }
+        try loadLUT(from: try Data(contentsOf: url))
+    }
+
+    private func applyCube(size: Int, data: Data) {
+        lutFilter = CIFilter(name: "CIColorCube")!
+        lutFilter.setValue(size, forKey: "inputCubeDimension")
+        lutFilter.setValue(data, forKey: "inputCubeData")
+    }
+
+    // MARK: Core‑Image / Metal --------------------------------------------------
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        // 1. Try to acquire the semaphore. If we can't get it immediately,
-        // it means the GPU is still busy with previous frames.
-        // In this case, we simply drop the current frame and return.
-        // This is the key to preventing back-pressure and stutters.
-        guard inflightSemaphore.wait(timeout: .now()) == .success else {
-            // print("Dropping frame, GPU is busy.")
-            return
-        }
-
-        // 2. We now have a "slot". Proceed with processing.
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-            inflightSemaphore.signal() // MUST release the slot if we fail
-            return
-        }
-
-        let sourceImage = CIImage(cvPixelBuffer: pixelBuffer)
-        lutFilter?.setValue(sourceImage, forKey: kCIInputImageKey)
-        
-        guard let filteredImage = lutFilter?.outputImage else {
-            inflightSemaphore.signal() // MUST release the slot if we fail
-            return
-        }
-
-        // 3. Dispatch the render task to the main thread where the MTKView runs.
-        // We pass the semaphore along so the main thread knows to signal it upon completion.
-        DispatchQueue.main.async {
-            // The `filteredImage` still points to the CVPixelBuffer, but that's okay.
-            // The semaphore guarantees the buffer is still valid when this block executes
-            // and when the GPU eventually reads it.
-            self.latestImage = filteredImage
-            
-            // We no longer need to explicitly call .draw() because the view is un-paused.
-            // The `draw(in:)` method will pick up `latestImage` on its next cycle.
-            
-            // IMPORTANT: The semaphore is now signaled from within `draw(in:)`'s completion handler.
+        autoreleasepool {
+            guard let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+            let src = CIImage(cvPixelBuffer: pixel)
+            lutFilter.setValue(src, forKey: kCIInputImageKey)
+            if let out = lutFilter.outputImage {
+                Task { @MainActor in self.latestImage = out }
+            }
         }
     }
 
-
-    func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-        if let error = error {
-            let cameraError = mapToCameraError(error)
-            flutterApi.onCameraError(viewId: viewId, error: cameraError) { _ in }
-            recordingContinuation?.resume(throwing: error)
-        } else {
-            let filePath = outputFileURL.path
-            flutterApi.onRecordingStopped(viewId: viewId, filePath: filePath) { _ in }
-            recordingContinuation?.resume(returning: filePath)
-        }
+    func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo url: URL, from connections: [AVCaptureConnection], error: Error?) {
+        if let e = error { recordingContinuation?.resume(throwing: e) } else { recordingContinuation?.resume(returning: url.path) }
         recordingContinuation = nil
     }
-    /*
-    func setupPreviewLayer() {
-        guard let session = captureSession else { return }
-        
-        _view.videoPreviewLayer.session = session
-        _view.videoPreviewLayer.videoGravity = .resizeAspectFill
-        
-        if let connection = _view.videoPreviewLayer.connection {
-            connection.videoRotationAngle = 0
-        }
-    } */
 
-    func findBestFormat() -> AVCaptureDevice.Format? {
-        guard let device = mainCamera else { return nil }
+    // MARK: MTKViewDelegate -----------------------------------------------------
 
-        let formats = device.formats
-
-        func score(_ format: AVCaptureDevice.Format) -> Int {
-            let desc = format.formatDescription
-            let resolution = CMVideoFormatDescriptionGetDimensions(desc)
-
-            let is4k = resolution.width >= 3840 && resolution.height >= 2160
-            let isFullHD = resolution.width >= 1920 && resolution.height >= 1080
-
-            let cinematicextendedStabilization = format.isVideoStabilizationModeSupported(
-                .cinematicExtended)
-            let cinematicStabilization = format.isVideoStabilizationModeSupported(.cinematic)
-            let autoStabilization = format.isVideoStabilizationModeSupported(.auto)
-
-            let appleLog = format.supportedColorSpaces.contains(.appleLog)
-            let hdr = format.supportedColorSpaces.contains(.HLG_BT2020)
-
-            var cinematicExtendedEnhancedStabilization = false
-            if #available(iOS 18.0, *) {
-                cinematicExtendedEnhancedStabilization = format.isVideoStabilizationModeSupported(
-                    .cinematicExtendedEnhanced)
-            }
-
-            var cinematicVideo = false
-            //if #available(iOS 26.0, *) {
-            //    cinematicVideo = format.isCinematicVideoCaptureSupported
-            //}
-
-            var score = 0
-            if is4k { score -= 10000 }
-            if isFullHD { score += 7000 }
-            if appleLog { score += 10000 }
-            if cinematicVideo { score += 1000 }
-            if hdr { score += 500 }
-            if cinematicExtendedEnhancedStabilization { score += 100 }
-            if cinematicextendedStabilization { score += 75 }
-            if cinematicStabilization { score += 50 }
-            if autoStabilization { score += 25 }
-
-            return score
-        }
-
-        return
-            formats
-            .max(by: { score($0) < score($1) })
-    }
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
     
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-        // This delegate method is called when the view's size changes.
-        // You can handle resizing logic here if needed.
-    }
+    let cgColorSpace = CGColorSpaceCreateDeviceRGB()
+    var drawableRect = CGRect.zero
 
     func draw(in view: MTKView) {
-        // Since captureOutput is now blocking, we are guaranteed that
-        // latestFilteredImage will not be written to while we are here.
-        // However, it might be nil if the first frame hasn't arrived.
-        guard let imageToRender = self.latestImage else {
-            NSLog("Dropped Frame \(Date())")
-            return
-        }
+        inflightSemaphore.wait(); defer { inflightSemaphore.signal() }
 
-        guard let commandBuffer = _view.commandQueue.makeCommandBuffer(),
-              let drawable = view.currentDrawable else {
-            // This can happen. If it does, we can't render, and we can't add a
-            // completion handler, so we can't signal. This would cause a deadlock.
-            // It's a rare edge case, but to be safe, we should handle it.
-            // For now, we assume it succeeds. A more robust solution might be needed
-            // if this becomes a problem.
-            return
-        }
+        guard
+            let drawable = view.currentDrawable,
+            let cmd      = _view.commandQueue.makeCommandBuffer(),
+            let src      = latestImage
+        else { return }
 
-        // IMPORTANT: Add the completion handler BEFORE you commit the buffer.
-        // This handler will be called by the system on a background thread
-        // AFTER the GPU has finished executing the command buffer.
-        commandBuffer.addCompletedHandler { [weak self] _ in
-            // Signal the semaphore to allow the next frame to be processed.
-            self?.inflightSemaphore.signal()
-        }
+        // ----- safe guard --------------------------------------------------------
+        let w = view.drawableSize.width
+        let h = view.drawableSize.height
+        guard w > 0, h > 0 else { return }               // <- prevents NaN/∞
+        let srcExtent = src.extent
+        guard srcExtent.width > 0, srcExtent.height > 0 else { return }
 
-        let sourceExtent = imageToRender.extent
-            let drawableRect = CGRect(origin: .zero, size: view.drawableSize)
-            let sourceAspect = sourceExtent.width / sourceExtent.height
-            let drawableAspect = drawableRect.width / drawableRect.height
-            let scale = (sourceAspect > drawableAspect) ? (drawableRect.height / sourceExtent.height) : (drawableRect.width / sourceExtent.width)
-            let scaledSize = CGSize(width: sourceExtent.width * scale, height: sourceExtent.height * scale)
-            let translationX = (drawableRect.width - scaledSize.width) / 2.0
-            let translationY = (drawableRect.height - scaledSize.height) / 2.0
+        // ----- centre-crop transform --------------------------------------------
+        let scale = max(w / srcExtent.width, h / srcExtent.height)
+        let dx = (w - srcExtent.width  * scale) * 0.5 / scale
+        let dy = (h - srcExtent.height * scale) * 0.5 / scale
 
-        let transform = CGAffineTransform(translationX: -sourceExtent.minX, y: -sourceExtent.minY)
-            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
-            .concatenating(CGAffineTransform(translationX: translationX, y: translationY))
+        let tf = CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: scale)
+        let final = src.transformed(by: tf).cropped(to: CGRect(origin: .zero, size: view.drawableSize))
 
-        let finalImage = imageToRender
-            .transformed(by: transform)
-            .cropped(to: drawableRect)
+        _view.ciContext.render(final, to: drawable.texture, commandBuffer: cmd,
+                               bounds: CGRect(origin: .zero, size: view.drawableSize),
+                               colorSpace: cgColorSpace)
 
-        // 4. Define the render destination.
-        let destination = CIRenderDestination(
-            width: Int(drawableRect.width),
-            height: Int(drawableRect.height),
-            pixelFormat: view.colorPixelFormat,
-            commandBuffer: commandBuffer) { () -> MTLTexture in
-                return drawable.texture
-        }
- // your destination setup
+        cmd.present(drawable); cmd.commit()
 
-        do {
-            try _view.ciContext.startTask(toRender: finalImage, to: destination)
-        } catch {
-            print("Error rendering image in draw(in:): \(error.localizedDescription)")
-            // If the render task fails, we must still signal to prevent deadlock.
-            inflightSemaphore.signal()
-        }
-
-        // Present the drawable and commit the command buffer to the GPU.
-        commandBuffer.present(drawable)
-        commandBuffer.commit()
+        frameCounter &+= 1
+        if frameCounter & 0xFF == 0 { _view.ciContext.clearCaches() }
     }
 
 
+    // MARK: misc helpers --------------------------------------------------------
+
+    private func findBestFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
+        device.formats.max { score($0) < score($1) }
+    }
+    private func score(_ f: AVCaptureDevice.Format) -> Int {
+        let d = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+        var s = 0
+        if d.width >= 1920 && d.height >= 1080 { s += 7_000 }
+        if f.supportedColorSpaces.contains(.appleLog) { s += 10_000 }
+        if f.isVideoStabilizationModeSupported(.cinematicExtended) { s += 75 }
+        return s
+    }
+
+    private func mapToCameraError(_ error: Error) -> CameraError {
+        if let e = error as? CameraSetupError { return CameraError(code: e.code, message: e.localizedDescription, details: String(describing: e)) }
+        return CameraError(code: "UNKNOWN_ERROR", message: error.localizedDescription, details: String(describing: error))
+    }
+    
+    private func makeConfiguration() -> CameraConfiguration {
+        let camera      = (captureSession.inputs.first as? AVCaptureDeviceInput)!.device
+        let format      = camera.activeFormat
+        let dims        = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        let conn        = movieFileOutput?.connection(with: .video)
+
+        // -------- enum mapping helpers ----------
+        func mapCodec(_ t: AVVideoCodecType) -> VideoCodec {
+            switch t {
+            case .proRes422Proxy: return .prores422Proxy
+            case .hevc:           return .hevc
+            default:              return .h264
+            }
+        }
+
+        func mapStab(_ m: AVCaptureVideoStabilizationMode) -> StabilizationMode {
+            switch m {
+            case .cinematicExtendedEnhanced: return .cinematicExtendedEnhanced
+            case .cinematicExtended:         return .cinematicExtended
+            case .cinematic:                 return .cinematic
+            case .auto:                      return .auto
+            default:                         return .off
+            }
+        }
+
+        func mapMic(_ pos: AVCaptureDevice.Position) -> MicrophonePosition {
+            switch pos {
+            case .back:  return .back
+            case .front: return .front
+            default:     return .bottom   // bottom mic equals .unspecified on iPhone
+            }
+        }
+
+        func mapRes(_ w: Int32, _ h: Int32) -> ResolutionPreset {
+            if w >= 3840 || h >= 2160 { return .hd4K }
+            if w >= 1920 || h >= 1080 { return .hd1080 }
+            if w >= 1280 || h >=  720 { return .hd720 }
+            if w >=  960 || h >=  540 { return .sd540 }
+            return .sd480
+        }
+
+        func mapColor(_ cs: AVCaptureColorSpace) -> ColorSpace {
+            switch cs {
+            case .appleLog: return .appleLog
+            case .HLG_BT2020: return .hlgBt2020
+            default: return .srgb
+            }
+        }
+        // ----------------------------------------
+
+        let fps = Int64(30)
+
+        return CameraConfiguration(
+            videoCodec:        mapCodec(selectedVideoCodec),
+            stabilizationMode: mapStab(conn?.activeVideoStabilizationMode ?? .off),
+            microphonePosition: mapMic((captureSession.inputs
+                                       .compactMap { $0 as? AVCaptureDeviceInput }
+                                       .first { $0.device.hasMediaType(.audio) })?
+                                       .device.position ?? .unspecified),
+            resolutionPreset:  mapRes(dims.width, dims.height),
+            colorSpace:        mapColor(camera.activeColorSpace),
+            frameRate:         fps
+        )
+    }
 }
 
-class CameraPreviewView: MTKView {
+// MARK: - Custom MTKView with tuned CIContext ----------------------------------
 
+final class CameraPreviewView: MTKView {
     let commandQueue: MTLCommandQueue
     let ciContext: CIContext
 
     init() {
-        guard let device = MTLCreateSystemDefaultDevice(),
-              let commandQueue = device.makeCommandQueue() else {
-            fatalError("Metal is not supported on this device")
-        }
-        self.commandQueue = commandQueue
-        
-        self.ciContext = CIContext(mtlDevice: device, options: [
-                    .workingColorSpace: NSNull()
-                ])
-        
+        guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else { fatalError("Metal not supported") }
+        commandQueue = queue
+        ciContext = CIContext(mtlDevice: device, options: [
+            .workingColorSpace : CGColorSpace(name: CGColorSpace.sRGB)! ,
+            .cacheIntermediates: false
+        ])
         super.init(frame: .zero, device: device)
-        
-        self.colorPixelFormat = .bgra8Unorm
-        self.framebufferOnly = false
-        self.autoResizeDrawable = true
-        self.contentMode = .scaleAspectFill
-        
-        // --- CORRECT CONFIGURATION ---
-        // Let the view manage its own display link timer.
-        self.isPaused = false
-        // You are not using a manual trigger, so this must be false.
-        self.enableSetNeedsDisplay = false
-        // Hint the desired frame rate. It will sync to the display, but this is good practice.
-        self.preferredFramesPerSecond = 30
-        // -----------------------------
+        colorPixelFormat = .bgra8Unorm
+        framebufferOnly = false
+        enableSetNeedsDisplay = false
+        isPaused = true
+        preferredFramesPerSecond = 30
     }
 
-    required init(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
-
-
-// MARK: - Error Types
+// MARK: - Error enum -----------------------------------------------------------
 
 enum CameraSetupError: LocalizedError {
-    case sessionCreationFailed
-    case inputSetupFailed
-    case outputSetupFailed
-    case noSuitableCamera
-    case cannotAddInput
-    case cannotAddOutput
-    case audioNotAvailable
-    case cannotAddAudioInput
-    case audioSetupFailed
-    
+    case sessionCreationFailed, inputSetupFailed, outputSetupFailed, noSuitableCamera, cannotAddInput, cannotAddOutput, audioNotAvailable, cannotAddAudioInput, audioSetupFailed
     var code: String {
         switch self {
         case .sessionCreationFailed: return "SESSION_CREATION_FAILED"
-        case .inputSetupFailed: return "INPUT_SETUP_FAILED"
-        case .outputSetupFailed: return "OUTPUT_SETUP_FAILED"
-        case .noSuitableCamera: return "NO_SUITABLE_CAMERA"
-        case .cannotAddInput: return "CANNOT_ADD_INPUT"
-        case .cannotAddOutput: return "CANNOT_ADD_OUTPUT"
-        case .audioNotAvailable: return "AUDIO_NOT_AVAILABLE"
-        case .cannotAddAudioInput: return "CANNOT_ADD_AUDIO_INPUT"
-        case .audioSetupFailed: return "AUDIO_SETUP_FAILED"
+        case .inputSetupFailed:     return "INPUT_SETUP_FAILED"
+        case .outputSetupFailed:    return "OUTPUT_SETUP_FAILED"
+        case .noSuitableCamera:     return "NO_SUITABLE_CAMERA"
+        case .cannotAddInput:       return "CANNOT_ADD_INPUT"
+        case .cannotAddOutput:      return "CANNOT_ADD_OUTPUT"
+        case .audioNotAvailable:    return "AUDIO_NOT_AVAILABLE"
+        case .cannotAddAudioInput:  return "CANNOT_ADD_AUDIO_INPUT"
+        case .audioSetupFailed:     return "AUDIO_SETUP_FAILED"
         }
     }
-    
-    var errorDescription: String? {
-        switch self {
-        case .sessionCreationFailed: return "Failed to create capture session"
-        case .inputSetupFailed: return "Failed to setup camera inputs"
-        case .outputSetupFailed: return "Failed to setup camera outputs"
-        case .noSuitableCamera: return "No suitable camera found"
-        case .cannotAddInput: return "Cannot add input to capture session"
-        case .cannotAddOutput: return "Cannot add output to capture session"
-        case .audioNotAvailable: return "No microphone available"
-        case .cannotAddAudioInput: return "Cannot add audio input to capture session"
-        case .audioSetupFailed: return "Failed to setup audio input"
-        }
-    }
+    var errorDescription: String? { code.replacingOccurrences(of: "_", with: " ").capitalized }
 }

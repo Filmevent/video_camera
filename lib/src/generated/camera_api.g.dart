@@ -83,7 +83,6 @@ enum ColorSpace {
 
 class CameraConfiguration {
   CameraConfiguration({
-    required this.position,
     required this.videoCodec,
     required this.stabilizationMode,
     required this.microphonePosition,
@@ -91,8 +90,6 @@ class CameraConfiguration {
     required this.colorSpace,
     required this.frameRate,
   });
-
-  CameraPosition position;
 
   VideoCodec videoCodec;
 
@@ -108,7 +105,6 @@ class CameraConfiguration {
 
   List<Object?> _toList() {
     return <Object?>[
-      position,
       videoCodec,
       stabilizationMode,
       microphonePosition,
@@ -124,13 +120,12 @@ class CameraConfiguration {
   static CameraConfiguration decode(Object result) {
     result as List<Object?>;
     return CameraConfiguration(
-      position: result[0]! as CameraPosition,
-      videoCodec: result[1]! as VideoCodec,
-      stabilizationMode: result[2]! as StabilizationMode,
-      microphonePosition: result[3]! as MicrophonePosition,
-      resolutionPreset: result[4]! as ResolutionPreset,
-      colorSpace: result[5]! as ColorSpace,
-      frameRate: result[6]! as int,
+      videoCodec: result[0]! as VideoCodec,
+      stabilizationMode: result[1]! as StabilizationMode,
+      microphonePosition: result[2]! as MicrophonePosition,
+      resolutionPreset: result[3]! as ResolutionPreset,
+      colorSpace: result[4]! as ColorSpace,
+      frameRate: result[5]! as int,
     );
   }
 
@@ -426,6 +421,57 @@ class CameraHostApi {
       return;
     }
   }
+
+  Future<CameraConfiguration> getCameraConfiguration(int viewId) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.video_camera.CameraHostApi.getCameraConfiguration$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[viewId]);
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_sendFuture as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else if (pigeonVar_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (pigeonVar_replyList[0] as CameraConfiguration?)!;
+    }
+  }
+
+  Future<void> setLut(int viewId, Uint8List lutData) async {
+    final String pigeonVar_channelName = 'dev.flutter.pigeon.video_camera.CameraHostApi.setLut$pigeonVar_messageChannelSuffix';
+    final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[viewId, lutData]);
+    final List<Object?>? pigeonVar_replyList =
+        await pigeonVar_sendFuture as List<Object?>?;
+    if (pigeonVar_replyList == null) {
+      throw _createConnectionError(pigeonVar_channelName);
+    } else if (pigeonVar_replyList.length > 1) {
+      throw PlatformException(
+        code: pigeonVar_replyList[0]! as String,
+        message: pigeonVar_replyList[1] as String?,
+        details: pigeonVar_replyList[2],
+      );
+    } else {
+      return;
+    }
+  }
 }
 
 abstract class CameraFlutterApi {
@@ -438,6 +484,8 @@ abstract class CameraFlutterApi {
   void onRecordingStarted(int viewId);
 
   void onRecordingStopped(int viewId, String filePath);
+
+  void onCameraConfiguration(int viewId, CameraConfiguration configuration);
 
   static void setUp(CameraFlutterApi? api, {BinaryMessenger? binaryMessenger, String messageChannelSuffix = '',}) {
     messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
@@ -538,6 +586,34 @@ abstract class CameraFlutterApi {
               'Argument for dev.flutter.pigeon.video_camera.CameraFlutterApi.onRecordingStopped was null, expected non-null String.');
           try {
             api.onRecordingStopped(arg_viewId!, arg_filePath!);
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+    {
+      final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.video_camera.CameraFlutterApi.onCameraConfiguration$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          assert(message != null,
+          'Argument for dev.flutter.pigeon.video_camera.CameraFlutterApi.onCameraConfiguration was null.');
+          final List<Object?> args = (message as List<Object?>?)!;
+          final int? arg_viewId = (args[0] as int?);
+          assert(arg_viewId != null,
+              'Argument for dev.flutter.pigeon.video_camera.CameraFlutterApi.onCameraConfiguration was null, expected non-null int.');
+          final CameraConfiguration? arg_configuration = (args[1] as CameraConfiguration?);
+          assert(arg_configuration != null,
+              'Argument for dev.flutter.pigeon.video_camera.CameraFlutterApi.onCameraConfiguration was null, expected non-null CameraConfiguration.');
+          try {
+            api.onCameraConfiguration(arg_viewId!, arg_configuration!);
             return wrapResponse(empty: true);
           } on PlatformException catch (e) {
             return wrapResponse(error: e);

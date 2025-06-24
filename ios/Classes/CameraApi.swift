@@ -176,7 +176,6 @@ enum ColorSpace: Int {
 
 /// Generated class from Pigeon that represents data sent in messages.
 struct CameraConfiguration: Hashable {
-  var position: CameraPosition
   var videoCodec: VideoCodec
   var stabilizationMode: StabilizationMode
   var microphonePosition: MicrophonePosition
@@ -187,16 +186,14 @@ struct CameraConfiguration: Hashable {
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
   static func fromList(_ pigeonVar_list: [Any?]) -> CameraConfiguration? {
-    let position = pigeonVar_list[0] as! CameraPosition
-    let videoCodec = pigeonVar_list[1] as! VideoCodec
-    let stabilizationMode = pigeonVar_list[2] as! StabilizationMode
-    let microphonePosition = pigeonVar_list[3] as! MicrophonePosition
-    let resolutionPreset = pigeonVar_list[4] as! ResolutionPreset
-    let colorSpace = pigeonVar_list[5] as! ColorSpace
-    let frameRate = pigeonVar_list[6] as! Int64
+    let videoCodec = pigeonVar_list[0] as! VideoCodec
+    let stabilizationMode = pigeonVar_list[1] as! StabilizationMode
+    let microphonePosition = pigeonVar_list[2] as! MicrophonePosition
+    let resolutionPreset = pigeonVar_list[3] as! ResolutionPreset
+    let colorSpace = pigeonVar_list[4] as! ColorSpace
+    let frameRate = pigeonVar_list[5] as! Int64
 
     return CameraConfiguration(
-      position: position,
       videoCodec: videoCodec,
       stabilizationMode: stabilizationMode,
       microphonePosition: microphonePosition,
@@ -207,7 +204,6 @@ struct CameraConfiguration: Hashable {
   }
   func toList() -> [Any?] {
     return [
-      position,
       videoCodec,
       stabilizationMode,
       microphonePosition,
@@ -360,6 +356,8 @@ protocol CameraHostApi {
   func pauseCamera(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void)
   func resumeCamera(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void)
   func disposeCamera(viewId: Int64, completion: @escaping (Result<Void, Error>) -> Void)
+  func getCameraConfiguration(viewId: Int64, completion: @escaping (Result<CameraConfiguration, Error>) -> Void)
+  func setLut(viewId: Int64, lutData: FlutterStandardTypedData, completion: @escaping (Result<Void, Error>) -> Void)
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
@@ -470,6 +468,41 @@ class CameraHostApiSetup {
     } else {
       disposeCameraChannel.setMessageHandler(nil)
     }
+    let getCameraConfigurationChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_camera.CameraHostApi.getCameraConfiguration\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getCameraConfigurationChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let viewIdArg = args[0] as! Int64
+        api.getCameraConfiguration(viewId: viewIdArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getCameraConfigurationChannel.setMessageHandler(nil)
+    }
+    let setLutChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.video_camera.CameraHostApi.setLut\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      setLutChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let viewIdArg = args[0] as! Int64
+        let lutDataArg = args[1] as! FlutterStandardTypedData
+        api.setLut(viewId: viewIdArg, lutData: lutDataArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      setLutChannel.setMessageHandler(nil)
+    }
   }
 }
 /// Generated protocol from Pigeon that represents Flutter messages that can be called from Swift.
@@ -478,6 +511,7 @@ protocol CameraFlutterApiProtocol {
   func onCameraError(viewId viewIdArg: Int64, error errorArg: CameraError, completion: @escaping (Result<Void, PigeonError>) -> Void)
   func onRecordingStarted(viewId viewIdArg: Int64, completion: @escaping (Result<Void, PigeonError>) -> Void)
   func onRecordingStopped(viewId viewIdArg: Int64, filePath filePathArg: String, completion: @escaping (Result<Void, PigeonError>) -> Void)
+  func onCameraConfiguration(viewId viewIdArg: Int64, configuration configurationArg: CameraConfiguration, completion: @escaping (Result<Void, PigeonError>) -> Void)
 }
 class CameraFlutterApi: CameraFlutterApiProtocol {
   private let binaryMessenger: FlutterBinaryMessenger
@@ -547,6 +581,24 @@ class CameraFlutterApi: CameraFlutterApiProtocol {
     let channelName: String = "dev.flutter.pigeon.video_camera.CameraFlutterApi.onRecordingStopped\(messageChannelSuffix)"
     let channel = FlutterBasicMessageChannel(name: channelName, binaryMessenger: binaryMessenger, codec: codec)
     channel.sendMessage([viewIdArg, filePathArg] as [Any?]) { response in
+      guard let listResponse = response as? [Any?] else {
+        completion(.failure(createConnectionError(withChannelName: channelName)))
+        return
+      }
+      if listResponse.count > 1 {
+        let code: String = listResponse[0] as! String
+        let message: String? = nilOrValue(listResponse[1])
+        let details: String? = nilOrValue(listResponse[2])
+        completion(.failure(PigeonError(code: code, message: message, details: details)))
+      } else {
+        completion(.success(()))
+      }
+    }
+  }
+  func onCameraConfiguration(viewId viewIdArg: Int64, configuration configurationArg: CameraConfiguration, completion: @escaping (Result<Void, PigeonError>) -> Void) {
+    let channelName: String = "dev.flutter.pigeon.video_camera.CameraFlutterApi.onCameraConfiguration\(messageChannelSuffix)"
+    let channel = FlutterBasicMessageChannel(name: channelName, binaryMessenger: binaryMessenger, codec: codec)
+    channel.sendMessage([viewIdArg, configurationArg] as [Any?]) { response in
       guard let listResponse = response as? [Any?] else {
         completion(.failure(createConnectionError(withChannelName: channelName)))
         return

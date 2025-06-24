@@ -39,9 +39,8 @@ flutter:
         pluginClass: VideoCameraPlugin
 
   # To add assets to your plugin package, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  assets:
+    - assets/luts/
   #
   # For details regarding assets in packages, see
   # https://flutter.dev/to/asset-from-package

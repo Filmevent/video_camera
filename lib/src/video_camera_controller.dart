@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:video_camera/src/generated/camera_api.g.dart';
 
 class VideoCameraController extends CameraFlutterApi {
@@ -25,6 +26,17 @@ class VideoCameraController extends CameraFlutterApi {
     } on Exception catch (e) {
       debugPrint("Failed to send initialize command: $e");
     }
+  }
+
+  Future<void> setLut(Uint8List bytes) async {
+    final id = _viewId;
+    if (id == null) return;
+    await _hostApi.setLut(id, bytes);
+  }
+
+  Future<void> setLutFromAsset(String assetPath) async {
+    final data = await rootBundle.load(assetPath);
+    await setLut(data.buffer.asUint8List());
   }
 
   Future<void> startRecording() async {
@@ -97,5 +109,10 @@ class VideoCameraController extends CameraFlutterApi {
       isRecording.value = false;
       debugPrint('Recording stopped. File saved at: $filePath');
     }
+  }
+
+  @override
+  void onCameraConfiguration(int viewId, CameraConfiguration configuration) {
+    // TODO: implement onCameraConfiguration
   }
 }

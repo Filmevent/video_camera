@@ -26,6 +26,12 @@ abstract class CameraHostApi {
 
   @async
   void disposeCamera(int viewId);
+
+  @async
+  CameraConfiguration getCameraConfiguration(int viewId);
+
+  @async
+  void setLut(int viewId, Uint8List lutData);
 }
 
 @FlutterApi()
@@ -34,6 +40,7 @@ abstract class CameraFlutterApi {
   void onCameraError(int viewId, CameraError error);
   void onRecordingStarted(int viewId);
   void onRecordingStopped(int viewId, String filePath);
+  void onCameraConfiguration(int viewId, CameraConfiguration configuration);
 }
 
 enum CameraPosition { front, back }
@@ -55,7 +62,6 @@ enum ResolutionPreset { hd4K, hd1080, hd720, sd540, sd480 }
 enum ColorSpace { appleLog, hlgBt2020, srgb }
 
 class CameraConfiguration {
-  final CameraPosition position;
   final VideoCodec videoCodec;
   final StabilizationMode stabilizationMode;
   final MicrophonePosition microphonePosition;
@@ -64,13 +70,12 @@ class CameraConfiguration {
   final int frameRate;
 
   CameraConfiguration({
-    this.position = CameraPosition.back,
-    this.videoCodec = VideoCodec.prores422Proxy,
-    this.stabilizationMode = StabilizationMode.auto,
-    this.microphonePosition = MicrophonePosition.back,
-    this.resolutionPreset = ResolutionPreset.hd1080,
-    this.colorSpace = ColorSpace.appleLog,
-    this.frameRate = 30,
+    required this.videoCodec,
+    required this.stabilizationMode,
+    required this.microphonePosition,
+    required this.resolutionPreset,
+    required this.colorSpace,
+    required this.frameRate,
   });
 }
 
