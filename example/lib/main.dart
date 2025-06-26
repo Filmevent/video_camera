@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_camera/video_camera.dart';
-import 'package:video_camera_example/core/services/device_orientation_service/device_orientation_provider.dart';
+import 'package:video_camera_example/core/services/device_orientation_provider.dart';
 import 'package:video_camera_example/manual_orientation_controller.dart';
 
 void main() async {
