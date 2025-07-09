@@ -14,7 +14,7 @@ A new Flutter plugin project.
   s.author           = { 'Your Company' => 'email@example.com' }
   s.source           = { :path => '.' }
   s.source_files = 'Classes/**/*'
-  s.resources = ['Models/ShotTypeClassifier.mlpackage']
+  s.resources = ['Models/ShotTypeClassifier.mlmodelc', 'Models/ShotTypeClassifier.mlpackage']
   s.dependency 'Flutter'
   s.platform = :ios, '17.0'
 

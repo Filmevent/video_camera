@@ -192,23 +192,101 @@ final class FLNativeView: NSObject, FlutterPlatformView, AVCaptureVideoDataOutpu
                                                 qos: .userInitiated)
 
 
-    private lazy var shotModel: VNCoreMLModel = {
-        let bundle = Bundle(for: FLNativeView.self)
-        guard let modelURL = bundle.url(forResource: "ShotTypeClassifier",
-                                        withExtension: "mlmodelc") else {
-            fatalError("ShotTypeClassifier.mlmodelc not found in plugin bundle")
+    private lazy var shotModel: VNCoreMLModel? = {
+        let frameworkBundle = Bundle(for: FLNativeView.self)
+        let resourceBundleURL = frameworkBundle.url(forResource: "video_camera", withExtension: "bundle")
+        let resourceBundle = resourceBundleURL.flatMap { Bundle(url: $0) }
+        let bundles = [resourceBundle, frameworkBundle].compactMap { $0 }
+        
+        for bundle in bundles {
+            // Try .mlmodelc first since that's what we found
+            if let modelURL = bundle.url(forResource: "ShotTypeClassifier", withExtension: "mlmodelc") {
+                do {
+                    print("📦 Found compiled model at: \(modelURL)")
+                    let coreML = try MLModel(contentsOf: modelURL)
+                    
+                    // Print model details
+                    print("📊 Model Description:")
+                    print("  - Inputs: \(coreML.modelDescription.inputDescriptionsByName)")
+                    print("  - Outputs: \(coreML.modelDescription.outputDescriptionsByName)")
+                    print("  - Metadata: \(coreML.modelDescription.metadata)")
+                    
+                    if let imageConstraint = coreML.modelDescription.inputDescriptionsByName.values.first?.imageConstraint {
+                        print("  - Expected image format: \(imageConstraint.pixelFormatType)")
+                        print("  - Expected size: \(imageConstraint.pixelsWide) x \(imageConstraint.pixelsHigh)")
+                    }
+                    
+                    return try VNCoreMLModel(for: coreML)
+                } catch {
+                    print("❌ Failed to load mlmodelc: \(error)")
+                }
+            }
         }
-        let coreML = try! MLModel(contentsOf: modelURL)      // already compiled
-        return try! VNCoreMLModel(for: coreML)
+        
+        print("❌ ShotTypeClassifier model not found")
+        return nil
     }()
 
-    /// Request stays the same
-    private lazy var shotRequest: VNCoreMLRequest = {
-        VNCoreMLRequest(model: shotModel) { [weak self] req, _ in
-            guard let obs = req.results?.first as? VNClassificationObservation else { return }
-            self?.sendShotTypeToFlutter(obs.identifier, prob: Double(obs.confidence))
+    private lazy var shotRequest: VNCoreMLRequest? = {
+        guard let model = shotModel else { return nil }
+        
+        let request = VNCoreMLRequest(model: model) { [weak self] req, error in
+            guard let self = self else { return }
+            
+            if let error = error {
+                print("❌ Shot request error: \(error)")
+                return
+            }
+            
+            // Handle MultiArray output from MovieShots model
+            if let features = req.results as? [VNCoreMLFeatureValueObservation],
+               let outputFeature = features.first(where: { $0.featureName == "output" }),
+               let multiArray = outputFeature.featureValue.multiArrayValue {
+                
+                var logits: [Float] = []
+                for i in 0..<multiArray.count {
+                    logits.append(Float(truncating: multiArray[i]))
+                }
+                
+                // Apply softmax
+                let maxLogit = logits.max() ?? 0
+                let expValues = logits.map { exp($0 - maxLogit) }
+                let sumExp = expValues.reduce(0, +)
+                let probabilities = expValues.map { $0 / sumExp }
+                
+                if let maxIndex = probabilities.indices.max(by: { probabilities[$0] < probabilities[$1] }) {
+                    let labels = ["LS", "FS", "MS", "CS", "ECS"]
+                    let fullNames = [
+                        "Long Shot",
+                        "Full Shot",
+                        "Medium Shot",
+                        "Close-up",
+                        "Extreme Close-up"
+                    ]
+                    
+                    let label = labels[maxIndex]
+                    let fullName = fullNames[maxIndex]
+                    let confidence = probabilities[maxIndex]
+                    
+                    // Debug output
+                    if confidence > 0.3 { // Only log confident predictions
+                        print("🎯 \(label) - \(fullName): \(String(format: "%.1f%%", confidence * 100))")
+                        print("   All probabilities: \(probabilities.enumerated().map { "\(labels[$0]): \(String(format: "%.1f%%", $1 * 100))" }.joined(separator: ", "))")
+                    }
+                    
+                    self.sendShotTypeToFlutter(label, prob: Double(confidence))
+                }
+            }
         }
+        
+        // CRITICAL: Use scaleFit to see the entire frame
+        // This is important for shot type classification!
+        request.imageCropAndScaleOption = .scaleFill
+        
+        
+        return request
     }()
+
 
     // MARK: init
     init(frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?, flutterApi: CameraFlutterApi) {
@@ -446,24 +524,45 @@ final class FLNativeView: NSObject, FlutterPlatformView, AVCaptureVideoDataOutpu
         autoreleasepool {
             guard let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-            // LUT path ----------------------------------------------------------
+            // LUT path
             let src = CIImage(cvPixelBuffer: pixel)
             lutFilter.setValue(src, forKey: kCIInputImageKey)
             if let out = lutFilter.outputImage {
                 Task { @MainActor in self.latestImage = out }
             }
 
-            // Shot-type classification every 15th frame ------------------------
+            // Shot-type classification every 15th frame
+            frameCounter &+= 1
             if frameCounter % 15 == 0 {
-                classificationQueue.async { [req = self.shotRequest, pixel] in
-                    let handler = VNImageRequestHandler(cvPixelBuffer: pixel,
-                                                        orientation: .up,
-                                                        options: [:])
-                    try? handler.perform([req])
+                guard let request = shotRequest else {
+                    if frameCounter % 150 == 0 {
+                        print("⚠️ Shot classification skipped - no model loaded")
+                    }
+                    return
                 }
+                
+                // Print pixel buffer details once
+                if frameCounter == 15 {
+                    let width = CVPixelBufferGetWidth(pixel)
+                    let height = CVPixelBufferGetHeight(pixel)
+                    let format = CVPixelBufferGetPixelFormatType(pixel)
+                    print("📹 Pixel buffer: \(width)x\(height), format: \(format)")
+                }
+                
+                if let request = shotRequest {
+                    classificationQueue.async {
+                        let handler = VNImageRequestHandler(cvPixelBuffer: pixel,
+                                                            orientation: .up,
+                                                            options: [:])
+                        try? handler.perform([request])
+                    }
+                }
+
             }
         }
     }
+
+
 
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo url: URL, from connections: [AVCaptureConnection], error: Error?) {
         if let e = error { recordingContinuation?.resume(throwing: e) } else { recordingContinuation?.resume(returning: url.path) }
