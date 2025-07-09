@@ -1,6 +1,8 @@
 import AVFoundation
 import MetalKit
 import Flutter
+import Vision
+import CoreML
 import UIKit
 
 // MARK: - Flutter view factory -------------------------------------------------
@@ -185,6 +187,28 @@ final class FLNativeView: NSObject, FlutterPlatformView, AVCaptureVideoDataOutpu
 
     // Async recording continuation
     private var recordingContinuation: CheckedContinuation<String, Error>?
+
+    private let classificationQueue = DispatchQueue(label: "shot_type_queue",
+                                                qos: .userInitiated)
+
+
+    private lazy var shotModel: VNCoreMLModel = {
+        let bundle = Bundle(for: FLNativeView.self)
+        guard let modelURL = bundle.url(forResource: "ShotTypeClassifier",
+                                        withExtension: "mlmodelc") else {
+            fatalError("ShotTypeClassifier.mlmodelc not found in plugin bundle")
+        }
+        let coreML = try! MLModel(contentsOf: modelURL)      // already compiled
+        return try! VNCoreMLModel(for: coreML)
+    }()
+
+    /// Request stays the same
+    private lazy var shotRequest: VNCoreMLRequest = {
+        VNCoreMLRequest(model: shotModel) { [weak self] req, _ in
+            guard let obs = req.results?.first as? VNClassificationObservation else { return }
+            self?.sendShotTypeToFlutter(obs.identifier, prob: Double(obs.confidence))
+        }
+    }()
 
     // MARK: init
     init(frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?, flutterApi: CameraFlutterApi) {
@@ -415,13 +439,28 @@ final class FLNativeView: NSObject, FlutterPlatformView, AVCaptureVideoDataOutpu
 
     // MARK: Core‑Image / Metal --------------------------------------------------
 
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    func captureOutput(_ output: AVCaptureOutput,
+                    didOutput sampleBuffer: CMSampleBuffer,
+                    from connection: AVCaptureConnection) {
+
         autoreleasepool {
             guard let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+            // LUT path ----------------------------------------------------------
             let src = CIImage(cvPixelBuffer: pixel)
             lutFilter.setValue(src, forKey: kCIInputImageKey)
             if let out = lutFilter.outputImage {
                 Task { @MainActor in self.latestImage = out }
+            }
+
+            // Shot-type classification every 15th frame ------------------------
+            if frameCounter % 15 == 0 {
+                classificationQueue.async { [req = self.shotRequest, pixel] in
+                    let handler = VNImageRequestHandler(cvPixelBuffer: pixel,
+                                                        orientation: .up,
+                                                        options: [:])
+                    try? handler.perform([req])
+                }
             }
         }
     }
@@ -600,4 +639,15 @@ enum CameraSetupError: LocalizedError {
         }
     }
     var errorDescription: String? { code.replacingOccurrences(of: "_", with: " ").capitalized }
+}
+
+extension FLNativeView {
+    // must accept BOTH label and probability
+    private func sendShotTypeToFlutter(_ label: String, prob: Double) {
+        flutterApi.onShotTypeUpdated(
+            viewId: viewId,
+            shotType: label,
+            confidence: prob   // matches the Pigeon API
+        ) { _ in }
+    }
 }

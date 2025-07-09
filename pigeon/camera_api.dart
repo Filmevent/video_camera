@@ -41,6 +41,7 @@ abstract class CameraFlutterApi {
   void onRecordingStarted(int viewId);
   void onRecordingStopped(int viewId, String filePath);
   void onCameraConfiguration(int viewId, CameraConfiguration configuration);
+  void onShotTypeUpdated(int viewId, String shotType, double confidence);
 }
 
 enum CameraPosition { front, back }

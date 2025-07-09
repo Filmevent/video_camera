@@ -27,7 +27,7 @@ SPEC CHECKSUMS:
   Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
   integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
   native_device_orientation: e3580675687d5034770da198f6839ebf2122ef94
-  video_camera: 203ba2b982b0e0e10095f0419118501b61d55b1c
+  video_camera: 6f7013bd221692a590c25ef0af0bc0d3fc847768
 
 PODFILE CHECKSUM: 4305caec6b40dde0ae97be1573c53de1882a07e5
 

@@ -1,5 +1,5 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:video_camera/src/video_camera_controller.dart';
 import 'package:video_camera/src/widgets/lut_carousel.dart';
 
@@ -56,6 +56,28 @@ class _VideoCameraWidgetState extends State<VideoCameraWidget>
           layoutDirection: TextDirection.ltr,
           creationParams: const {},
           creationParamsCodec: const StandardMessageCodec(),
+        ),
+
+        // Shot-type overlay
+        StreamBuilder<ShotTypeEvent>(
+          stream: widget.controller.shotTypes,
+          builder: (_, snap) {
+            if (!snap.hasData) return const SizedBox.shrink();
+            final e = snap.data!;
+            final percent = (e.confidence * 100).toStringAsFixed(1);
+            return Positioned(
+              top: 16,
+              left: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                color: Colors.black54,
+                child: Text(
+                  '${e.label}  $percent %',
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                ),
+              ),
+            );
+          },
         ),
         CameraLutCarousel(
           controller: widget.controller,

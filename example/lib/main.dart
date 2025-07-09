@@ -73,14 +73,6 @@ class _CameraScreenState extends State<CameraScreen> {
                     : const CircularProgressIndicator();
               },
             ),
-            ValueListenableBuilder(
-              valueListenable: _controller.isRecording,
-              builder: (context, isRecording, child) {
-                return isRecording
-                    ? const SizedBox.shrink()
-                    : const Text('PortriatModeDetected');
-              },
-            ),
           ],
         ),
       ),

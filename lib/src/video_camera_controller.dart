@@ -4,10 +4,18 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:video_camera/src/generated/camera_api.g.dart';
 
+class ShotTypeEvent {
+  final String label;
+  final double confidence;
+  ShotTypeEvent(this.label, this.confidence);
+}
+
 class VideoCameraController extends CameraFlutterApi {
   VideoCameraController() {
     CameraFlutterApi.setUp(this);
   }
+  final _shotStream = StreamController<ShotTypeEvent>.broadcast();
+  Stream<ShotTypeEvent> get shotTypes => _shotStream.stream;
 
   final CameraHostApi _hostApi = CameraHostApi();
   int? _viewId;
@@ -114,5 +122,12 @@ class VideoCameraController extends CameraFlutterApi {
   @override
   void onCameraConfiguration(int viewId, CameraConfiguration configuration) {
     // TODO: implement onCameraConfiguration
+  }
+  
+  @override
+  void onShotTypeUpdated(int viewId, String shotType, double confidence) {
+    if (viewId == _viewId) {
+      _shotStream.add(ShotTypeEvent(shotType, confidence));
+    }
   }
 }

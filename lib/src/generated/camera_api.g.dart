@@ -487,6 +487,8 @@ abstract class CameraFlutterApi {
 
   void onCameraConfiguration(int viewId, CameraConfiguration configuration);
 
+  void onShotTypeUpdated(int viewId, String shotType, double confidence);
+
   static void setUp(CameraFlutterApi? api, {BinaryMessenger? binaryMessenger, String messageChannelSuffix = '',}) {
     messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
     {
@@ -614,6 +616,37 @@ abstract class CameraFlutterApi {
               'Argument for dev.flutter.pigeon.video_camera.CameraFlutterApi.onCameraConfiguration was null, expected non-null CameraConfiguration.');
           try {
             api.onCameraConfiguration(arg_viewId!, arg_configuration!);
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+    {
+      final BasicMessageChannel<Object?> pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.video_camera.CameraFlutterApi.onShotTypeUpdated$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          assert(message != null,
+          'Argument for dev.flutter.pigeon.video_camera.CameraFlutterApi.onShotTypeUpdated was null.');
+          final List<Object?> args = (message as List<Object?>?)!;
+          final int? arg_viewId = (args[0] as int?);
+          assert(arg_viewId != null,
+              'Argument for dev.flutter.pigeon.video_camera.CameraFlutterApi.onShotTypeUpdated was null, expected non-null int.');
+          final String? arg_shotType = (args[1] as String?);
+          assert(arg_shotType != null,
+              'Argument for dev.flutter.pigeon.video_camera.CameraFlutterApi.onShotTypeUpdated was null, expected non-null String.');
+          final double? arg_confidence = (args[2] as double?);
+          assert(arg_confidence != null,
+              'Argument for dev.flutter.pigeon.video_camera.CameraFlutterApi.onShotTypeUpdated was null, expected non-null double.');
+          try {
+            api.onShotTypeUpdated(arg_viewId!, arg_shotType!, arg_confidence!);
             return wrapResponse(empty: true);
           } on PlatformException catch (e) {
             return wrapResponse(error: e);
